@@ -23,14 +23,14 @@ uniform float maxPointSize = 400.0;
 uniform float pointPixelScale = 0;
 uniform vec3 cursorPos = vec3(0);
 uniform int fileNumber = 0;
-in float intensity;
 in vec3 position;
-in vec3 color;
-in float distance;
+in float intensity;
 in int returnNumber;
 in int numberOfReturns;
 in int pointSourceId;
 in int classification;
+in vec3 color;
+in float distance;
 //in float heightAboveGround;
 
 flat out float modifiedPointRadius;

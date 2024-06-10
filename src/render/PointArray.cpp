@@ -19,6 +19,8 @@
 #include <queue>
 
 #include <cfloat>
+#include <chrono>
+#include <thread>
 
 #include "ply_io.h"
 
@@ -138,7 +140,7 @@ static OctreeNode* makeTree(int depth, size_t* inds,
                             float halfWidth, ProgressFunc& progressFunc)
 {
     OctreeNode* node = new OctreeNode(center, halfWidth);
-    const size_t pointsPerNode = 100000;
+    const size_t pointsPerNode = 100000;//1; //100000;
     // Limit max depth of tree to prevent infinite recursion when
     // greater than pointsPerNode points lie at the same position in
     // space.  floats effectively have 24 bit of precision in the
@@ -188,8 +190,12 @@ static OctreeNode* makeTree(int depth, size_t* inds,
 PointArray::PointArray()
     : m_npoints(0),
     m_positionFieldIdx(-1),
-    m_P(0)
-{ }
+      m_P(0),
+      currentInd(0)
+{
+   nowtm = time(NULL);
+
+}
 
 
 PointArray::~PointArray()
@@ -321,6 +327,16 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
             break;
         }
     }
+    m_Tris.push_back(0);
+    m_Tris.push_back(1);
+    m_Tris.push_back(2);
+    for (size_t i = 3; i < m_npoints; ++i)
+    {
+       m_Tris.push_back(i-2);
+       m_Tris.push_back(i-1);
+       m_Tris.push_back(i);
+    }
+    
     if (m_positionFieldIdx == -1)
     {
         g_logger.error("No position field found in file %s", fileName);
@@ -354,7 +370,7 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
         m_rootNode.reset(new OctreeNode(V3f(0), 1));
         return true;
     }
-
+    currentInd=m_npoints;
     // Sort points into octree order
     emit loadStepStarted("Sorting points");
     std::unique_ptr<size_t[]> inds(new size_t[m_npoints]);
@@ -635,6 +651,13 @@ void PointArray::initializeGL()
     GLuint vbo;
     glGenBuffers(1, &vbo);
     setVBO("point_buffer", vbo);
+
+    GLuint ebo;
+    glGenBuffers(1, &ebo);
+    setEBO("element_buffer", ebo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_Tris.size()*sizeof(unsigned int), &m_Tris.front(), GL_STATIC_DRAW);
+        
 }
 
 void PointArray::draw(const TransformState& transState, double quality) const
@@ -650,6 +673,16 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
     GLuint vbo = getVBO("point_buffer");
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
+    GLuint ebo = getEBO("element_buffer");
+/*
+    before=nowtm;
+    nowtm = time(NULL);
+    if(nowtm-before>=2){
+       --currentInd;
+       if(currentInd==0)currentInd=m_npoints;
+       g_logger.info("currentInd: %ld",currentInd);
+    };
+*/  
     TransformState relativeTrans = transState.translate(offset());
     relativeTrans.setUniforms(prog.programId());
     //printActiveShaderAttributes(prog.programId());
@@ -727,6 +760,8 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
         if (!incrementalDraw)
             node->nextBeginIndex = node->beginIndex;
 
+        //if(node->endIndex<currentInd)
+        //   continue;
         DrawCount nodeDrawCount = node->drawCount(relCamera, quality, incrementalDraw);
         drawCount += nodeDrawCount;
 
@@ -748,7 +783,13 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
         // http://hacksoflife.blogspot.com.au/2015/06/glmapbuffer-no-longer-cool.html )
         GLsizeiptr nodeBufferSize = perVertexBytes * nodeDrawCount.numVertices;
         glBufferData(GL_ARRAY_BUFFER, nodeBufferSize, NULL, GL_STREAM_DRAW);
-
+/*
+        g_logger.info("beginIndex: %d",node->beginIndex);
+        g_logger.info("endIndex: %d",node->endIndex);
+        g_logger.info("nextBeginIndex: %d",node->nextBeginIndex);
+        g_logger.info("center: %f,%f,%f",
+                      node->center.x, node->center.y, node->center.z);
+*/
         GLintptr bufferOffset = 0;
         for (size_t i = 0, k = 0; i < m_fields.size(); k+=m_fields[i].spec.arraySize(), ++i)
         {
@@ -797,6 +838,19 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
 
         glDrawArrays(GL_POINTS, 0, (GLsizei)nodeDrawCount.numVertices);
         node->nextBeginIndex += nodeDrawCount.numVertices;
+    if (drawCount.numVertices==m_npoints) {
+           glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+           glEnable(GL_DEPTH_TEST);
+           glDepthFunc(GL_LEQUAL);
+           glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+           glDrawElements(
+              GL_TRIANGLES,      // mode
+              m_Tris.size(),    // count
+              GL_UNSIGNED_INT,   // type
+              (void*)0           // element array buffer offset
+           );
+            g_logger.info("%d tris drawn",drawCount.numVertices);
+}
     }
     //tfm::printf("Drew %d of total points %d, quality %f\n", totDraw, m_npoints, quality);
 

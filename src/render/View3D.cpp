@@ -1037,6 +1037,11 @@ DrawCount View3D::drawPoints(const TransformState& transState,
     double dPR = getDevicePixelRatio();
 
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE);
+//    if (!m_log) {
+//       g_logger.info("Used shader:\n%s\n",
+//                     (const char*)m_shaderProgram->shaderSource());
+//       m_log=true;
+//    }
     // Draw points
     QGLShaderProgram& prog = m_shaderProgram->shaderProgram();
     prog.bind();

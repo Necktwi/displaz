@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include <time.h>
 
 #include "Geometry.h"
 #include "typespec.h"
@@ -76,6 +77,8 @@ class PointArray : public Geometry
 
         /// Total number of loaded points
         size_t m_npoints;
+        /// Total tries generated
+        std::vector<unsigned long> m_Tris;
         /// Spatial hierarchy
         std::unique_ptr<OctreeNode> m_rootNode;
         /// Point data field storage
@@ -84,6 +87,10 @@ class PointArray : public Geometry
         int m_positionFieldIdx;
         V3f* m_P;
         std::unique_ptr<uint32_t[]> m_inds;
+
+   mutable time_t before;
+   mutable time_t nowtm;
+   mutable size_t currentInd;
 };
 
 

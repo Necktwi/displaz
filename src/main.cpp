@@ -102,7 +102,7 @@ int main(int argc, char *argv[])
 
     std::string notifySpec;
     std::string notifyMessage;
-
+    
     ArgParse::ArgParse ap;
     ap.options(
         "displaz - A lidar point cloud viewer\n"

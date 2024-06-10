@@ -148,6 +148,7 @@ class View3D : public QGLWidget
         bool m_drawAnnotations;
         /// If true, OpenGL initialization didn't work properly
         bool m_badOpenGL;
+   bool m_log = false;
         /// Shader for point clouds
         std::unique_ptr<ShaderProgram> m_shaderProgram;
         /// Shaders for polygonal geometry

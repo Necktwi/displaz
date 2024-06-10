@@ -1,5 +1,7 @@
 # Build system for a subset of third party libraries required by displaz.
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CMAKE_BUILD_TYPE "Release" CACHE STRING
     "Choose the type of build, options are: None(CMAKE_CXX_FLAGS or CMAKE_C_FLAGS used) Debug Release RelWithDebInfo MinSizeRel."
 )

@@ -169,6 +169,17 @@ const unsigned int Geometry::getVBO(const char * vertexBufferName) const
     return 0;
 }
 
+const unsigned int Geometry::getEBO(const char * elementBufferName) const
+{
+    // always call this from an active OpenGL context
+    if(m_EBO.find(std::string(elementBufferName)) != m_EBO.end())
+    {
+        return m_EBO.at(std::string(elementBufferName));
+    }
+    tfm::printfln("Geometry :: elementBufferObject was not found - %s", elementBufferName);
+    return 0;
+}
+
 const unsigned int Geometry::shaderId(const char * shaderName) const
 {
     if(m_Shaders.find(shaderName) != m_Shaders.end())
