@@ -140,7 +140,7 @@ static OctreeNode* makeTree(int depth, size_t* inds,
                             float halfWidth, ProgressFunc& progressFunc)
 {
     OctreeNode* node = new OctreeNode(center, halfWidth);
-    const size_t pointsPerNode = 100000;//1; //100000;
+    const size_t pointsPerNode = 1;//1; //100000;
     // Limit max depth of tree to prevent infinite recursion when
     // greater than pointsPerNode points lie at the same position in
     // space.  floats effectively have 24 bit of precision in the
@@ -194,7 +194,7 @@ PointArray::PointArray()
       currentInd(0)
 {
    nowtm = time(NULL);
-
+   before = nowtm;
 }
 
 
@@ -674,15 +674,15 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
     GLuint ebo = getEBO("element_buffer");
-/*
-    before=nowtm;
+
     nowtm = time(NULL);
     if(nowtm-before>=2){
+       before=nowtm;
        --currentInd;
        if(currentInd==0)currentInd=m_npoints;
        g_logger.info("currentInd: %ld",currentInd);
     };
-*/  
+  
     TransformState relativeTrans = transState.translate(offset());
     relativeTrans.setUniforms(prog.programId());
     //printActiveShaderAttributes(prog.programId());
@@ -760,8 +760,8 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
         if (!incrementalDraw)
             node->nextBeginIndex = node->beginIndex;
 
-        //if(node->endIndex<currentInd)
-        //   continue;
+        if(node->endIndex<currentInd)
+           break;
         DrawCount nodeDrawCount = node->drawCount(relCamera, quality, incrementalDraw);
         drawCount += nodeDrawCount;
 
@@ -782,6 +782,7 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
         // http://stackoverflow.com/questions/25111565/how-to-deallocate-glbufferdata-memory
         // http://hacksoflife.blogspot.com.au/2015/06/glmapbuffer-no-longer-cool.html )
         GLsizeiptr nodeBufferSize = perVertexBytes * nodeDrawCount.numVertices;
+//      GLsizeiptr nodeBufferSize = perVertexBytes * m_npoints;
         glBufferData(GL_ARRAY_BUFFER, nodeBufferSize, NULL, GL_STREAM_DRAW);
 /*
         g_logger.info("beginIndex: %d",node->beginIndex);
@@ -835,9 +836,9 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
 
             bufferOffset += fieldBufferSize;
         }
-
-        glDrawArrays(GL_POINTS, 0, (GLsizei)nodeDrawCount.numVertices);
+      glDrawArrays(GL_POINTS, 0, (GLsizei)nodeDrawCount.numVertices);
         node->nextBeginIndex += nodeDrawCount.numVertices;
+    }
     if (drawCount.numVertices==m_npoints) {
            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
            glEnable(GL_DEPTH_TEST);
@@ -851,7 +852,6 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
            );
             g_logger.info("%d tris drawn",drawCount.numVertices);
 }
-    }
     //tfm::printf("Drew %d of total points %d, quality %f\n", totDraw, m_npoints, quality);
 
     // Disable all attribute arrays - leaving these enabled seems to screw with
