@@ -88,9 +88,9 @@ View3D::View3D(GeometryCollection* geometries, const QGLFormat& format, QWidget 
     m_incrementalFrameTimer = new QTimer(this);
     m_incrementalFrameTimer->setSingleShot(false);
     connect(m_incrementalFrameTimer, SIGNAL(timeout()), this, SLOT(updateGL()));
-    QTimer* timer = new QTimer(this);
-    connect(timer, SIGNAL(timeout()), this, SLOT(restartRender()));
-    timer->start(1000);
+    //QTimer* timer = new QTimer(this);
+    //connect(timer, SIGNAL(timeout()), this, SLOT(restartRender()));
+    //timer->start(1000);
 }
 
 

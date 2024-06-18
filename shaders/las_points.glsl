@@ -33,162 +33,10 @@ in vec3 color;
 in float distance;
 //in float heightAboveGround;
 
-flat out float modifiedPointRadius;
-flat out float pointScreenSize;
-flat out vec3 pointColor;
-flat out int markerShape;
-
-float tonemap(float x, float reference, float contrast)
-{
-    float Y = pow(x/reference, contrast);
-    Y = Y / (1.0 + Y);
-    return Y;
-}
-
-vec3 jet_colormap(float x)
-{
-    if (x < 0.125)
-        return vec3(0, 0, 0.5 + 4*x);
-    if (x < 0.375)
-        return vec3(0, 4*(x-0.125), 1);
-    if (x < 0.625)
-        return vec3(4*(x-0.375), 1, 1 - 4*(x-0.375));
-    if (x < 0.875)
-        return vec3(1, 1 - 4*(x-0.625), 0);
-    return vec3(1 - 4*(x-0.875), 0, 0);
-}
-
 void main()
 {
     vec4 p = modelViewProjectionMatrix * vec4(position,1.0);
-    float r = length(position.xy - cursorPos.xy);
-    float trimFalloffLen = min(5, trimRadius/2);
-    float trimScale = min(1, (trimRadius - r)/trimFalloffLen);
-    modifiedPointRadius = pointRadius * trimScale;
-    pointScreenSize = clamp(2*pointPixelScale*modifiedPointRadius / p.w, minPointSize, maxPointSize);
-    markerShape = 1;
-    // Compute vertex color
-    if (colorMode == 0)
-        pointColor = tonemap(intensity, reference, contrast) * vec3(1);
-    else if (colorMode == 1)
-        pointColor = contrast*(exposure*color - vec3(0.5)) + vec3(0.5);
-    else if (colorMode == 2)
-        pointColor = vec3(0.2*returnNumber*exposure, 0.2*numberOfReturns*exposure, 0);
-    else if (colorMode == 3)
-    {
-        markerShape = (pointSourceId+1) % 5;
-        vec3 cols[] = vec3[](
-            vec3(1, 1, 1),   // White
-            vec3(1, 0, 0),   // Red
-            vec3(0, 1, 0),   // Green
-            vec3(0, 0, 1),   // Blue
-            vec3(1, 1, 0),   // Yellow
-            vec3(1, 0, 1),   // Magenta
-            vec3(0, 1, 1),   // Cyan
-            vec3(0.5, 0.5, 0.5),   // Gray
-            vec3(0.3, 0.6, 0.9),   // Light Blue
-            vec3(0.8, 0.2, 0.5),   // Dark Pink
-            vec3(0.2, 0.8, 0.5),   // Light Green
-            vec3(0.7, 0.4, 0.1),   // Brown
-            vec3(0.9, 0.6, 0.2),   // Orange
-            vec3(0.5, 0.2, 0.7),   // Purple
-            vec3(0.2, 0.7, 0.4),   // Teal
-            vec3(0.8, 0.8, 0.2),   // Olive
-            vec3(0.4, 0.2, 0.8),   // Indigo
-            vec3(0.6, 0.9, 0.3),   // Lime
-            vec3(0.7, 0.2, 0.5),   // Raspberry
-            vec3(0.2, 0.5, 0.7)    // Sky Blue
-        );
-        pointColor = cols[(pointSourceId + 3) % cols.length()];
-    }
-    else if (colorMode == 4)
-    {
-        // Colour according to some common classifications defined in the LAS spec
-        pointColor = vec3(exposure*classification);
-        if (classification == 2)      pointColor = vec3(0.33, 0.18, 0.0); // ground
-        else if (classification == 3) pointColor = vec3(0.25, 0.49, 0.0); // low vegetation
-        else if (classification == 4) pointColor = vec3(0.36, 0.7,  0.0); // medium vegetation
-        else if (classification == 5) pointColor = vec3(0.52, 1.0,  0.0); // high vegetation
-        else if (classification == 6) pointColor = vec3(0.8,  0.0,  0.0); // building
-        else if (classification == 9) pointColor = vec3(0.0,  0.0,  0.8); // water
-    }
-    else if (colorMode == 5)
-    {
-        // Set point colour and marker shape cyclically based on file number
-        markerShape = fileNumber % 5;
-        pointColor = vec3((1.0/2.0) * (0.5 + (fileNumber % 2)),
-                          (1.0/3.0) * (0.5 + (fileNumber % 3)),
-                          (1.0/5.0) * (0.5 + (fileNumber % 5)));
-    }
-    else if (colorMode == 6)
-    {
-        if (distance > 0)
-        {
-            float v = tonemap(distance, reference, contrast) * 3.0;
-            if (v < 1)
-                pointColor = mix(vec3(0.6,  0.6,  0.6), vec3(1.0,  1.0,  0.0), v);
-            else
-                if (v < 2)
-                    pointColor = mix(vec3(1.0,  1.0,  0.0), vec3(1.0,  0.5,  0.0), v - 1.0);
-                else
-                    pointColor = mix(vec3(1.0,  0.5,  0.0), vec3(1.0,  0.0,  0.0), v - 2.0);
-        }
-        else
-        {
-            float v = tonemap(-distance, reference, contrast) * 3.0;
-            if (v < 1)
-                pointColor = mix(vec3(0.6,  0.6,  0.6), vec3(0.0,  1.0,  1.0), v);
-            else
-                if (v < 2)
-                    pointColor = mix(vec3(0.0,  1.0,  1.0), vec3(0.5,  0.0,  1.0), v - 1.0);
-                else
-                    pointColor = mix(vec3(0.5,  0.0,  1.0), vec3(0.0,  0.0,  1.0), v - 2.0);
-        }
-    }
-    /*
-    else if (colorMode == 8)
-    {
-        // Color based on height above ground
-        pointColor = 0.8*jet_colormap(tonemap(0.16*heightAboveGround, exposure, 3.8*contrast));
-    }
-    */
-    if (selectionMode != 0)
-    {
-        if (selectionMode == 1)
-        {
-            if (classification == 0)
-                markerShape = -1;
-        }
-        else if (selectionMode == 2)
-        {
-            if (returnNumber != 1)
-                markerShape = -1;
-        }
-        else if (selectionMode == 3)
-        {
-            if (returnNumber != numberOfReturns)
-                markerShape = -1;
-        }
-        else if (selectionMode == 4)
-        {
-            if (returnNumber != 1 || numberOfReturns < 2)
-                markerShape = -1;
-        }
-    }
-    // Ensure zero size points are discarded.  The actual minimum point size is
-    // hardware and driver dependent, so set the markerShape to discarded for
-    // good measure.
-    if (pointScreenSize <= 0)
-    {
-        pointScreenSize = 0;
-        markerShape = -1;
-    }
-    else if (pointScreenSize < 1)
-    {
-        // Clamp to minimum size of 1 to avoid aliasing with some drivers
-        pointScreenSize = 1;
-    }
-    gl_PointSize = pointScreenSize;
+    gl_PointSize = 4;
     gl_Position = p;
 }
 
@@ -196,68 +44,13 @@ void main()
 //------------------------------------------------------------------------------
 #elif defined(FRAGMENT_SHADER)
 
-uniform float markerWidth = 0.3;
-
-flat in float modifiedPointRadius;
-flat in float pointScreenSize;
-flat in vec3 pointColor;
-flat in int markerShape;
 
 out vec4 fragColor;
 
-// Limit at which the point is rendered as a small square for antialiasing
-// rather than using a specific marker shape
-const float pointScreenSizeLimit = 2;
-const float sqrt2 = 1.414213562;
 
 void main()
 {
-    if (markerShape < 0) // markerShape == -1: discarded.
-        discard;
-    // (markerShape == 0: Square shape)
-#   ifndef BROKEN_GL_FRAG_COORD
-    gl_FragDepth = gl_FragCoord.z;
-#   endif
-    if (markerShape > 0 && pointScreenSize > pointScreenSizeLimit)
-    {
-        float w = markerWidth;
-        if (pointScreenSize < 2*pointScreenSizeLimit)
-        {
-            // smoothly turn on the markers as we get close enough to see them
-            w = mix(1, w, pointScreenSize/pointScreenSizeLimit - 1);
-        }
-        vec2 p = 2*(gl_PointCoord - 0.5);
-        if (markerShape == 1) // shape: .
-        {
-            float r = length(p);
-            if (r > 1)
-                discard;
-#           ifndef BROKEN_GL_FRAG_COORD
-            gl_FragDepth += projectionMatrix[3][2] * gl_FragCoord.w*gl_FragCoord.w
-                            // TODO: Why is the factor of 0.5 required here?
-                            * 0.5*modifiedPointRadius*sqrt(1-r*r);
-#           endif
-        }
-        else if (markerShape == 2) // shape: o
-        {
-            float r = length(p);
-            if (r > 1 || r < 1 - w)
-                discard;
-        }
-        else if (markerShape == 3) // shape: x
-        {
-            w *= 0.5*sqrt2;
-            if (abs(p.x + p.y) > w && abs(p.x - p.y) > w)
-                discard;
-        }
-        else if (markerShape == 4) // shape: +
-        {
-            w *= 0.5;
-            if (abs(p.x) > w && abs(p.y) > w)
-                discard;
-        }
-    }
-    fragColor = vec4(pointColor, 1);
+    fragColor = vec4(1);
 }
 
 #endif

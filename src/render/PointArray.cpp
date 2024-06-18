@@ -45,70 +45,69 @@ struct OctreeChildIdx
 };
 
 
-struct OctreeNode
-{
-    OctreeNode* children[8]; ///< Child nodes - order (x + 2*y + 4*z)
-    size_t beginIndex;       ///< Begin index of points in this node
-    size_t endIndex;         ///< End index of points in this node
-    mutable size_t nextBeginIndex; ///< Next index for incremental rendering
-    Imath::Box3f bbox;       ///< Actual bounding box of points in node
-    V3f center;              ///< center of the node
-    float halfWidth;         ///< Half the axis-aligned width of the node.
-
-    OctreeNode(const V3f& center, float halfWidth)
-        : beginIndex(0), endIndex(0), nextBeginIndex(0),
-        center(center), halfWidth(halfWidth)
-    {
-        for (int i = 0; i < 8; ++i)
+struct OctreeNode {
+   OctreeNode* children[8]; ///< Child nodes - order (x + 2*y + 4*z)
+   size_t beginIndex;       ///< Begin index of points in this node
+   size_t endIndex;         ///< End index of points in this node
+   mutable size_t nextBeginIndex; ///< Next index for incremental rendering
+   Imath::Box3f bbox;       ///< Actual bounding box of points in node
+   V3f center;              ///< center of the node
+   float halfWidth;         ///< Half the axis-aligned width of the node.
+   mutable size_t mVboIndex;
+   OctreeNode(const V3f& center, float halfWidth)
+      : beginIndex(0), endIndex(0), nextBeginIndex(0),
+        center(center), halfWidth(halfWidth), mVboIndex(0)
+      {
+         for (int i = 0; i < 8; ++i)
             children[i] = 0;
-    }
+      }
 
-    ~OctreeNode()
-    {
-        for (int i = 0; i < 8; ++i)
+   ~OctreeNode()
+      {
+         for (int i = 0; i < 8; ++i)
             delete children[i];
-    }
+      }
 
-    size_t findNearest(const EllipticalDist& distFunc,
-                       const V3d& offset, const V3f* p,
-                       double& dist) const
-    {
+   size_t findNearest(const EllipticalDist& distFunc,
+                      const V3d& offset, const V3f* p,
+                      double& dist) const
+      {
          return beginIndex + distFunc.findNearest(offset, p + beginIndex,
                                                   endIndex - beginIndex,
                                                   &dist);
-    }
+      }
 
-    size_t size() const { return endIndex - beginIndex; }
+   size_t size() const { return endIndex - beginIndex; }
 
-    bool isLeaf() const { return beginIndex != endIndex; }
+   bool isLeaf() const { return beginIndex != endIndex; }
 
-    /// Estimate cost of drawing a single leaf node with to given camera
-    /// position, quality, and incremental settings.
-    ///
-    /// Returns estimate of primitive draw count and whether there's anything
-    /// more to draw.
-    DrawCount drawCount(const V3f& relCamera,
-                        double quality, bool incrementalDraw) const
-    {
-        assert(isLeaf());
-        const double drawAllDist = 100;
-        double dist = (this->bbox.center() - relCamera).length();
-        double diagRadius = this->bbox.size().length()/2;
-        // Subtract bucket diagonal dist, since we really want an approx
-        // distance to closest point in the bucket, rather than dist to center.
-        dist = std::max(10.0, dist - diagRadius);
-        double desiredFraction = std::min(1.0, quality*pow(drawAllDist/dist, 2));
-        size_t chunkSize = (size_t)ceil(this->size()*desiredFraction);
-        DrawCount drawCount;
-        drawCount.numVertices = chunkSize;
-        if (incrementalDraw)
-        {
+   /// Estimate cost of drawing a single leaf node with to given camera
+   /// position, quality, and incremental settings.
+   ///
+   /// Returns estimate of primitive draw count and whether there's anything
+   /// more to draw.
+   DrawCount drawCount(const V3f& relCamera,
+                       double quality, bool incrementalDraw) const
+      {
+         assert(isLeaf());
+         const double drawAllDist = 100;
+         double dist = (this->bbox.center() - relCamera).length();
+         double diagRadius = this->bbox.size().length()/2;
+         // Subtract bucket diagonal dist, since we really want an approx
+         // distance to closest point in the bucket, rather than dist to center.
+         dist = std::max(10.0, dist - diagRadius);
+         double desiredFraction = std::min(1.0, quality*pow(drawAllDist/dist, 2));
+         size_t chunkSize = (size_t)ceil(this->size()*desiredFraction);
+         DrawCount drawCount;
+         drawCount.numVertices = chunkSize;
+         if (incrementalDraw)
+         {
             drawCount.numVertices = (this->nextBeginIndex >= this->endIndex) ? 0 :
-                std::min(chunkSize, this->endIndex - this->nextBeginIndex);
-        }
-        drawCount.moreToDraw = this->nextBeginIndex < this->endIndex;
-        return drawCount;
-    }
+               std::min(chunkSize, this->endIndex - this->nextBeginIndex);
+         }
+         drawCount.moreToDraw = this->nextBeginIndex < this->endIndex;
+         return drawCount;
+      }
 };
 
 
@@ -191,7 +190,8 @@ PointArray::PointArray()
     : m_npoints(0),
     m_positionFieldIdx(-1),
       m_P(0),
-      currentInd(0)
+      currentInd(0),
+      renderAt(0)
 {
    nowtm = time(NULL);
    before = nowtm;
@@ -330,20 +330,34 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
     m_Tris.push_back(0);
     m_Tris.push_back(1);
     m_Tris.push_back(2);
-    for (size_t i = 3; i < m_npoints; ++i)
+    ///*
+    for (size_t i = 3; i < 1000; ++i)
     {
        m_Tris.push_back(i-2);
        m_Tris.push_back(i-1);
        m_Tris.push_back(i);
     }
-    
+    //*/
     if (m_positionFieldIdx == -1)
     {
         g_logger.error("No position field found in file %s", fileName);
         return false;
     }
     m_P = (V3f*)m_fields[m_positionFieldIdx].as<float>();
-
+/*
+    m_P[ 0]={000.0, 000.0, 000.0};
+    m_P[ 1]={400.0, 400.0, 200.0};
+    m_P[ 2]={400.0, 000.0, 200.0};
+    m_P[ 3]={000.0, 400.0, 000.0};
+    m_P[ 4]={000.0, 400.0, 200.0};
+    m_P[ 5]={400.0, 400.0, 000.0};
+    m_P[ 6]={400.0, 000.0, 000.0};
+    m_P[ 7]={000.0, 000.0, 200.0};
+    m_P[ 8]={000.0, 200.0, 000.0};
+    m_P[ 9]={000.0, 200.0, 200.0};
+    m_P[10]={200.0, 200.0, 000.0};
+    m_P[11]={200.0, 000.0, 000.0};
+*/  
     // Compute bounding box and centroid
     Imath::Box3d bbox;
     V3d centroid(0);
@@ -656,7 +670,8 @@ void PointArray::initializeGL()
     glGenBuffers(1, &ebo);
     setEBO("element_buffer", ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_Tris.size()*sizeof(unsigned int), &m_Tris.front(), GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_Tris.size()*sizeof(unsigned int), NULL, GL_STREAM_DRAW);
+    //glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_Tris.size()*sizeof(unsigned int), &m_Tris[0], GL_STATIC_DRAW);
         
 }
 
@@ -664,9 +679,15 @@ void PointArray::draw(const TransformState& transState, double quality) const
 {
 }
 
-DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& transState,
-                                 double quality, bool incrementalDraw) const
-{
+bool ndMakesValidTri (std::vector<const OctreeNode*>& triNds,
+                      const OctreeNode* sibNd) {
+   return true;
+}
+
+DrawCount PointArray::drawPoints (
+   QGLShaderProgram& prog, const TransformState& transState,
+   double quality, bool incrementalDraw
+) const {
     GLuint vao = getVAO("points");
     glBindVertexArray(vao);
 
@@ -676,10 +697,12 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
     GLuint ebo = getEBO("element_buffer");
 
     nowtm = time(NULL);
+    renderAt=0;
     if(nowtm-before>=2){
        before=nowtm;
        --currentInd;
        if(currentInd==0)currentInd=m_npoints;
+       renderAt=1;
        g_logger.info("currentInd: %ld",currentInd);
     };
   
@@ -691,32 +714,25 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
     // TODO: attributeLocation() forces the OpenGL usage here to be
     // synchronous.  Does this matter?  (Alternative: bind them ourselves.)
     std::vector<const ShaderAttribute*> attributes;
-    for (size_t i = 0; i < m_fields.size(); ++i)
-    {
+    for (size_t i = 0; i < m_fields.size(); ++i) {
         const GeomField& field = m_fields[i];
-        if (field.spec.isArray())
-        {
-            for (int j = 0; j < field.spec.count; ++j)
-            {
+        if (field.spec.isArray()) {
+            for (int j = 0; j < field.spec.count; ++j) {
                 std::string name = tfm::format("%s[%d]", field.name, j);
                 attributes.push_back(findAttr(name, activeAttrs));
             }
-        }
-        else
-        {
+        } else {
             attributes.push_back(findAttr(field.name, activeAttrs));
         }
     }
     // Zero out active attributes in case they don't have associated fields
     GLfloat zeros[16] = {0};
-    for (size_t i = 0; i < activeAttrs.size(); ++i)
-    {
+    for (size_t i = 0; i < activeAttrs.size(); ++i) {
         prog.setAttributeValue((int)i, zeros, activeAttrs[i].rows,
                                activeAttrs[i].cols);
     }
     // Enable attributes which have associated fields
-    for (size_t i = 0; i < attributes.size(); ++i)
-    {
+    for (size_t i = 0; i < attributes.size(); ++i) {
         if (attributes[i])
             glEnableVertexAttribArray(attributes[i]->location);
     }
@@ -724,8 +740,7 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
     // Compute number of bytes required to store all attributes of a vertex, in
     // bytes.
     size_t perVertexBytes = 0;
-    for (size_t i = 0; i < m_fields.size(); ++i)
-    {
+    for (size_t i = 0; i < m_fields.size(); ++i) {
         const GeomField &field = m_fields[i];
         unsigned int arraySize = field.spec.arraySize();
         unsigned int vecSize = field.spec.vectorSize();
@@ -735,34 +750,61 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
     DrawCount drawCount;
     ClipBox clipBox(relativeTrans);
 
+    // Create a new uninitialized buffer for the current node, reserving
+    // enough space for the entire set of vertex attributes which will be
+    // passed to the shader.
+    //
+    // (This new memory area will be bound to the "point_buffer" VBO until
+    // the memory is orphaned by calling glBufferData() next time through
+    // the loop.  The orphaned memory should be cleaned up by the driver,
+    // and this may actually be quite efficient, see
+    // http://stackoverflow.com/questions/25111565/how-to-deallocate-glbufferdata-memory
+    // http://hacksoflife.blogspot.com.au/2015/06/glmapbuffer-no-longer-cool.html )
+    GLsizeiptr nodeBufferSize = perVertexBytes * m_npoints;
+    glBufferData(GL_ARRAY_BUFFER, nodeBufferSize, NULL, GL_STREAM_DRAW);
+
     // Draw points in each bucket, with total number drawn depending on how far
     // away the bucket is.  Since the points are shuffled, this corresponds to
     // a stochastic simplification of the full point cloud.
     V3f relCamera = relativeTrans.cameraPos();
     std::vector<const OctreeNode*> nodeStack;
+    std::vector<unsigned short> ndIndStack;
+    std::vector<const OctreeNode*> parntNdStack;
+    std::vector<unsigned short> parntNdIndStack;
     nodeStack.push_back(m_rootNode.get());
-    while (!nodeStack.empty())
-    {
+    ndIndStack.push_back(0);
+    GLintptr bufferOffset = 0;
+    unsigned int verticesToDraw = m_npoints;
+    size_t ndStkInd = 0;
+    unsigned int avgNdDist = 10;
+    while (!nodeStack.empty()) {
         const OctreeNode* node = nodeStack.back();
+        const short ndInd = ndIndStack.back();
         nodeStack.pop_back();
+        ndIndStack.pop_back();
         if (clipBox.canCull(node->bbox))
             continue;
-        if (!node->isLeaf())
-        {
-            for (int i = 0; i < 8; ++i)
-            {
-                OctreeNode* n = node->children[i];
-                if (n)
-                    nodeStack.push_back(n);
+        if (node && !node->isLeaf()) {
+           parntNdStack.push_back(node);
+           parntNdIndStack.push_back(ndInd);
+           for (int i = 7; i >=0; --i) {
+                const OctreeNode* n = node->children[i];
+                if (n) {
+                   nodeStack.push_back(n);
+                   ndIndStack.push_back(i);
+                }
             }
             continue;
         }
-        if (!incrementalDraw)
-            node->nextBeginIndex = node->beginIndex;
 
-        if(node->endIndex<currentInd)
-           break;
-        DrawCount nodeDrawCount = node->drawCount(relCamera, quality, incrementalDraw);
+        if (!incrementalDraw)
+           node->nextBeginIndex = node->beginIndex;
+
+//        if(node->endIndex<currentInd)
+//           break;
+        
+        DrawCount nodeDrawCount
+           = node->drawCount(relCamera, quality, incrementalDraw);
         drawCount += nodeDrawCount;
 
         if (nodeDrawCount.numVertices == 0)
@@ -770,94 +812,191 @@ DrawCount PointArray::drawPoints(QGLShaderProgram& prog, const TransformState& t
 
         if (m_fields.size() < 1)
             continue;
-
-        // Create a new uninitialized buffer for the current node, reserving
-        // enough space for the entire set of vertex attributes which will be
-        // passed to the shader.
-        //
-        // (This new memory area will be bound to the "point_buffer" VBO until
-        // the memory is orphaned by calling glBufferData() next time through
-        // the loop.  The orphaned memory should be cleaned up by the driver,
-        // and this may actually be quite efficient, see
-        // http://stackoverflow.com/questions/25111565/how-to-deallocate-glbufferdata-memory
-        // http://hacksoflife.blogspot.com.au/2015/06/glmapbuffer-no-longer-cool.html )
-        GLsizeiptr nodeBufferSize = perVertexBytes * nodeDrawCount.numVertices;
-//      GLsizeiptr nodeBufferSize = perVertexBytes * m_npoints;
-        glBufferData(GL_ARRAY_BUFFER, nodeBufferSize, NULL, GL_STREAM_DRAW);
-/*
+        /*
         g_logger.info("beginIndex: %d",node->beginIndex);
         g_logger.info("endIndex: %d",node->endIndex);
         g_logger.info("nextBeginIndex: %d",node->nextBeginIndex);
         g_logger.info("center: %f,%f,%f",
                       node->center.x, node->center.y, node->center.z);
-*/
-        GLintptr bufferOffset = 0;
-        for (size_t i = 0, k = 0; i < m_fields.size(); k+=m_fields[i].spec.arraySize(), ++i)
-        {
-            const GeomField& field = m_fields[i];
-            int arraySize = field.spec.arraySize();
-            int vecSize = field.spec.vectorSize();
+        */
+        GLsizeiptr nodeBufferSize = perVertexBytes * nodeDrawCount.numVertices;
 
-            // TODO?: Could use a single data-array that isn't split into
-            // vertex / normal / color / etc. sections, but has interleaved
-            // data ?  OpenGL has a stride value in glVertexAttribPointer for
-            // exactly this purpose, which should be used for better efficiency
-            // here we write only the current attribute data into this the
-            // buffer (e.g. all positions, then all colors)
-            GLsizeiptr fieldBufferSize = arraySize * vecSize * field.spec.elsize * nodeDrawCount.numVertices;
+        GLintptr fieldOffset = 0;
+        for (
+           size_t i = 0, k = 0; i < m_fields.size(); k+=m_fields[i].spec.arraySize(), ++i
+        ) {
 
-            // Upload raw data for `field` to the appropriate part of the buffer.
-            char* bufferData = field.data.get() + node->nextBeginIndex*field.spec.size();
-            glBufferSubData(GL_ARRAY_BUFFER, bufferOffset, fieldBufferSize, bufferData);
+           const GeomField& field = m_fields[i];
+           int arraySize = field.spec.arraySize();
+           int vecSize = field.spec.vectorSize();
 
-            // Tell OpenGL how to interpret the buffer of raw data which was
-            // just uploaded.  This should be a single call, but OpenGL spec
-            // insanity says we need `arraySize` calls (though arraySize=1
-            // for most usage.)
-            for (int j = 0; j < arraySize; ++j)
-            {
-                const ShaderAttribute* attr = attributes[k+j];
-                if (!attr)
-                    continue;
+           // TODO?: Could use a single data-array that isn't split into
+           // vertex / normal / color / etc. sections, but has interleaved
+           // data ?  OpenGL has a stride value in glVertexAttribPointer for
+           // exactly this purpose, which should be used for better efficiency
+           // here we write only the current attribute data into this the
+           // buffer (e.g. all positions, then all colors)
+           GLsizeiptr fieldBufferSize =
+              arraySize * vecSize * field.spec.elsize * nodeDrawCount.numVertices;
 
-                GLintptr arrayElementOffset = bufferOffset + j*field.spec.elsize;
+           // Upload raw data for `field` to the appropriate part of the buffer.
+           char* bufferData =
+              field.data.get() + node->nextBeginIndex*field.spec.size();
+           glBufferSubData(GL_ARRAY_BUFFER, bufferOffset, fieldBufferSize,
+                           bufferData);
+           /*
+             if (i==0)
+             g_logger.info("%d: %f,%f,%f",
+             node->beginIndex, ((V3f*)bufferData)->x,
+             ((V3f*)bufferData)->y, ((V3f*)bufferData)->z);
+           */
 
-                if (attr->baseType == TypeSpec::Int || attr->baseType == TypeSpec::Uint)
-                {
-                    glVertexAttribIPointer(attr->location, vecSize, glBaseType(field.spec),
-                                           0, (const GLvoid *)arrayElementOffset);
-                }
-                else
-                {
-                    glVertexAttribPointer(attr->location, vecSize, glBaseType(field.spec),
-                                          field.spec.fixedPoint, 0, (const GLvoid *)arrayElementOffset);
-                }
-            }
+           // Tell OpenGL how to interpret the buffer of raw data which was
+           // just uploaded.  This should be a single call, but OpenGL spec
+           // insanity says we need `arraySize` calls (though arraySize=1
+           // for most usage.)
+           for (int j = 0; j < arraySize; ++j) {
+              if(j>1)
+                 g_logger.info("ind: %ld, array: %d!",
+                               node->beginIndex, j);
+              const ShaderAttribute* attr = attributes[k+j];
+              if (!attr)
+                 continue;
 
-            bufferOffset += fieldBufferSize;
+              GLintptr arrayElementOffset = fieldOffset + j*field.spec.elsize;
+
+              if (
+                 attr->baseType == TypeSpec::Int ||
+                 attr->baseType == TypeSpec::Uint
+              ) {
+                 glVertexAttribIPointer(
+                    attr->location, vecSize, glBaseType(field.spec),
+                    0, (const GLvoid *)arrayElementOffset);
+              } else {
+                 glVertexAttribPointer(
+                    attr->location, vecSize, glBaseType(field.spec),
+                    field.spec.fixedPoint, perVertexBytes,
+                    (const GLvoid *)arrayElementOffset);
+              }
+           }
+
+           fieldOffset += fieldBufferSize;
+           bufferOffset += fieldBufferSize;
         }
-      glDrawArrays(GL_POINTS, 0, (GLsizei)nodeDrawCount.numVertices);
-        node->nextBeginIndex += nodeDrawCount.numVertices;
+        
+    
+      node->nextBeginIndex += nodeDrawCount.numVertices;
+      if(drawCount.numVertices>=verticesToDraw)
+         break;
+    
+
+      glDrawArrays(GL_POINTS, 0, (GLsizei)drawCount.numVertices);
+/*
+
+      const OctreeNode* parntNd = parntNdStack.back();
+      short parntNdInd = parntNdIndStack.back();
+      if (!node) {
+         if (ndInd==0) {
+            parntNdStack.pop_back();
+            parntNdIndStack.pop_back();
+         }
+         continue;
+      }
+      if(nodeDrawCount.numVertices>1)
+         g_logger.info("ind: %ld, nVerts: %d!",
+                       node->beginIndex, nodeDrawCount.numVertices);
+      node->mVboIndex=ndStkInd;
+      std::vector<const OctreeNode*> triNds;
+      triNds.push_back(node);
+      for (short mask=1; mask<8; ++mask) {
+         if (mask&ndInd==mask) {
+            short sibInd = (~mask) & ndInd;
+            const OctreeNode* sibNd = parntNd->children[sibInd];
+            if (sibNd) {
+               if (
+                  ndMakesValidTri(triNds, sibNd)
+               ) {
+                  triNds.push_back(sibNd);
+               }
+            }
+         } else {
+            short lParntNdInd = parntNdInd;
+            const OctreeNode* lParntNd = parntNd;
+            unsigned int treeHeight = parntNdStack.size()-1;
+            OctreeNode* parntSib = NULL;
+            unsigned int sibHt = 0;
+            // get parentnode whose child is mask compatible
+            while (treeHeight>1 && mask&lParntNdInd!=mask) {
+               --treeHeight;
+               lParntNdInd = parntNdIndStack[treeHeight];
+               lParntNd = parntNdStack[treeHeight-1];
+            }
+            if (treeHeight<=1)
+               goto vertInsEnd;
+            parntSib = lParntNd->children[ndInd];
+            sibHt = treeHeight+1;
+            while (true) {
+               if (parntSib->children[mask]) {
+                  parntSib=parntSib->children[mask];
+                  ++sibHt;
+               } else {
+                  break;
+               }
+             
+            }
+            triNds.push_back(parntSib);
+           vertInsEnd:
+         }
+      }
+      if (triNds.size()>=3) {
+         m_Tris.push_back(triNds[0]->mVboIndex);
+         m_Tris.push_back(triNds[1]->mVboIndex);
+         m_Tris.push_back(triNds[2]->mVboIndex);
+         for (int i=3; i<m_Tris.size(); ++i) {
+            for (int j=1; j<i; ++j) {
+               m_Tris.push_back(triNds[0]->mVboIndex);
+               m_Tris.push_back(triNds[j]->mVboIndex);
+               m_Tris.push_back(triNds[i]->mVboIndex);
+            }
+         }
+      }
+      if (ndInd==0) {
+         parntNdStack.pop_back();
+         parntNdIndStack.pop_back();
+      }
+*/
+      ++ndStkInd;
     }
-    if (drawCount.numVertices==m_npoints) {
-           glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-           glEnable(GL_DEPTH_TEST);
-           glDepthFunc(GL_LEQUAL);
-           glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-           glDrawElements(
-              GL_TRIANGLES,      // mode
-              m_Tris.size(),    // count
-              GL_UNSIGNED_INT,   // type
-              (void*)0           // element array buffer offset
-           );
-            g_logger.info("%d tris drawn",drawCount.numVertices);
-}
+    
+    if (drawCount.numVertices>=3) { //renderAt) {
+       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+       // glEnable(GL_DEPTH_TEST);
+       //  glDepthFunc(GL_LEQUAL);
+       glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+       glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, (3*drawCount.numVertices-6)*sizeof(unsigned int), &m_Tris[0]);
+       //glDrawArrays(GL_TRIANGLES, 0, (GLsizei)drawCount.numVertices);
+       glDrawElements(
+          GL_TRIANGLES,      // mode
+          3*drawCount.numVertices-6,    // count
+          GL_UNSIGNED_INT,   // type
+          (void*)0           // element array buffer offset
+       );
+       g_logger.info("%d tris drawn, m_Tris[0]: %lu",
+                     m_Tris.size(),
+                     m_Tris[0]);
+       /*
+         for(int i=0; i< m_Tris.size(); ++i) {
+         ++m_Tris[i];
+         if(m_Tris[i]==m_npoints)
+         m_Tris[i]=0;
+         }
+       */
+    }
     //tfm::printf("Drew %d of total points %d, quality %f\n", totDraw, m_npoints, quality);
 
     // Disable all attribute arrays - leaving these enabled seems to screw with
     // the OpenGL fixed function pipeline in unusual ways.
-    for (size_t i = 0; i < attributes.size(); ++i)
-    {
+    for (size_t i = 0; i < attributes.size(); ++i) {
         if (attributes[i])
             glDisableVertexAttribArray(attributes[i]->location);
     }

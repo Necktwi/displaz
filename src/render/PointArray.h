@@ -78,7 +78,7 @@ class PointArray : public Geometry
         /// Total number of loaded points
         size_t m_npoints;
         /// Total tries generated
-        std::vector<unsigned long> m_Tris;
+        mutable std::vector<unsigned int> m_Tris;
         /// Spatial hierarchy
         std::unique_ptr<OctreeNode> m_rootNode;
         /// Point data field storage
@@ -91,6 +91,7 @@ class PointArray : public Geometry
    mutable time_t before;
    mutable time_t nowtm;
    mutable size_t currentInd;
+   mutable size_t renderAt;
 };
 
 
