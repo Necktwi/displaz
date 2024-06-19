@@ -21,10 +21,24 @@
 #include <cfloat>
 #include <chrono>
 #include <thread>
+#include <iostream>
+#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
+#include <CGAL/Delaunay_triangulation_3.h>
+#include <CGAL/point_generators_3.h>
+#include <CGAL/draw_triangulation_3.h>
+#include <CGAL/Triangulation_vertex_base_with_info_3.h>
+#include <map>
 
 #include "ply_io.h"
 
 #include "ClipBox.h"
+
+typedef CGAL::Exact_predicates_inexact_constructions_kernel      K;
+typedef CGAL::Triangulation_vertex_base_with_info_3<unsigned, K> Vb;
+typedef CGAL::Triangulation_data_structure_3<Vb>                 Tds;
+typedef CGAL::Delaunay_triangulation_3<K, Tds>                   DT3;
+typedef K::Point_3                                               Point3;
+typedef CGAL::Creator_uniform_3<double,K::Point_3>               Creator;
 
 //------------------------------------------------------------------------------
 /// Functor to compute octree child node index with respect to some given split
@@ -327,17 +341,24 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
             break;
         }
     }
+    /*
     m_Tris.push_back(0);
     m_Tris.push_back(1);
     m_Tris.push_back(2);
-    ///*
     for (size_t i = 3; i < 1000; ++i)
     {
        m_Tris.push_back(i-2);
        m_Tris.push_back(i-1);
        m_Tris.push_back(i);
     }
-    //*/
+    
+       {
+          0, 1, 2,
+             2, 3, 1,
+             1, 5, 7,
+             7, 3, 1,
+             0, 1,
+             }*/
     if (m_positionFieldIdx == -1)
     {
         g_logger.error("No position field found in file %s", fileName);
@@ -345,25 +366,28 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
     }
     m_P = (V3f*)m_fields[m_positionFieldIdx].as<float>();
 /*
-    m_P[ 0]={000.0, 000.0, 000.0};
-    m_P[ 1]={400.0, 400.0, 200.0};
-    m_P[ 2]={400.0, 000.0, 200.0};
-    m_P[ 3]={000.0, 400.0, 000.0};
-    m_P[ 4]={000.0, 400.0, 200.0};
-    m_P[ 5]={400.0, 400.0, 000.0};
-    m_P[ 6]={400.0, 000.0, 000.0};
-    m_P[ 7]={000.0, 000.0, 200.0};
-    m_P[ 8]={000.0, 200.0, 000.0};
-    m_P[ 9]={000.0, 200.0, 200.0};
-    m_P[10]={200.0, 200.0, 000.0};
-    m_P[11]={200.0, 000.0, 000.0};
-*/  
+    m_P[ 0]={00.0, 00.0, 00.0};
+    m_P[ 1]={30.0, 00.0, 00.0};
+    m_P[ 2]={00.0, 30.0, 00.0};
+    m_P[ 3]={30.0, 30.0, 00.0};
+    m_P[ 4]={00.0, 00.0, 30.0};
+    m_P[ 5]={30.0, 00.0, 30.0};
+    m_P[ 6]={00.0, 30.0, 30.0};
+    m_P[ 7]={30.0, 30.0, 30.0};
+    m_P[ 8]={10.0, 10.0, 10.0};
+    m_P[ 9]={20.0, 10.0, 10.0};
+    m_P[10]={10.0, 20.0, 10.0};
+    m_P[11]={20.0, 20.0, 10.0};
+    m_P[12]={10.0, 10.0, 20.0};
+    m_P[13]={20.0, 10.0, 20.0};
+    m_P[14]={10.0, 20.0, 20.0};
+    m_P[15]={20.0, 20.0, 20.0};
+*/
     // Compute bounding box and centroid
     Imath::Box3d bbox;
     V3d centroid(0);
     V3d Psum(0);
-    for (size_t i = 0; i < m_npoints; ++i)
-    {
+    for (size_t i = 0; i < m_npoints; ++i) {
         Psum += m_P[i];
         bbox.extendBy(m_P[i]);
     }
@@ -670,7 +694,7 @@ void PointArray::initializeGL()
     glGenBuffers(1, &ebo);
     setEBO("element_buffer", ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_Tris.size()*sizeof(unsigned int), NULL, GL_STREAM_DRAW);
+    //glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_Tris.size()*sizeof(unsigned int), NULL, GL_STREAM_DRAW);
     //glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_Tris.size()*sizeof(unsigned int), &m_Tris[0], GL_STATIC_DRAW);
         
 }
@@ -684,325 +708,366 @@ bool ndMakesValidTri (std::vector<const OctreeNode*>& triNds,
    return true;
 }
 
+double volume(V3f& a, V3f& b, V3f& c, V3f& d) {
+    return std::abs(
+       (a.x*(b.y*c.z + c.y*d.z + d.y*b.z - b.y*d.z - c.y*b.z - d.y*c.z) +
+        a.y*(b.z*c.x + c.z*d.x + d.z*b.x - b.z*d.x - c.z*b.x - d.z*c.x) +
+        a.z*(b.x*c.y + c.x*d.y + d.x*b.y - b.x*d.y - c.x*b.y - d.x*c.y)) / 6.0);
+}
+
+bool isInsideTetrahedron(V3f& a, V3f& b, V3f& c, V3f& d, V3f& p) {
+    double V = volume(a, b, c, d);
+    double V1 = volume(p, b, c, d);
+    double V2 = volume(a, p, c, d);
+    double V3 = volume(a, b, p, d);
+    double V4 = volume(a, b, c, p);
+    return std::abs(V - (V1 + V2 + V3 + V4)) < 1e-6;
+}
+
+
 DrawCount PointArray::drawPoints (
    QGLShaderProgram& prog, const TransformState& transState,
    double quality, bool incrementalDraw
 ) const {
-    GLuint vao = getVAO("points");
-    glBindVertexArray(vao);
+   GLuint vao = getVAO("points");
+   glBindVertexArray(vao);
 
-    GLuint vbo = getVBO("point_buffer");
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+   GLuint vbo = getVBO("point_buffer");
+   glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
-    GLuint ebo = getEBO("element_buffer");
+   GLuint ebo = getEBO("element_buffer");
 
-    nowtm = time(NULL);
-    renderAt=0;
-    if(nowtm-before>=2){
-       before=nowtm;
-       --currentInd;
-       if(currentInd==0)currentInd=m_npoints;
-       renderAt=1;
-       g_logger.info("currentInd: %ld",currentInd);
-    };
+   nowtm = time(NULL);
+   renderAt=0;
+   if(nowtm-before>=2){
+      before=nowtm;
+      --currentInd;
+      if(currentInd==0)currentInd=m_npoints;
+      renderAt=1;
+      g_logger.info("currentInd: %ld",currentInd);
+   };
   
-    TransformState relativeTrans = transState.translate(offset());
-    relativeTrans.setUniforms(prog.programId());
-    //printActiveShaderAttributes(prog.programId());
-    std::vector<ShaderAttribute> activeAttrs = activeShaderAttributes(prog.programId());
-    // Figure out shader locations for each point field
-    // TODO: attributeLocation() forces the OpenGL usage here to be
-    // synchronous.  Does this matter?  (Alternative: bind them ourselves.)
-    std::vector<const ShaderAttribute*> attributes;
-    for (size_t i = 0; i < m_fields.size(); ++i) {
-        const GeomField& field = m_fields[i];
-        if (field.spec.isArray()) {
-            for (int j = 0; j < field.spec.count; ++j) {
-                std::string name = tfm::format("%s[%d]", field.name, j);
-                attributes.push_back(findAttr(name, activeAttrs));
+   TransformState relativeTrans = transState.translate(offset());
+   relativeTrans.setUniforms(prog.programId());
+   //printActiveShaderAttributes(prog.programId());
+   std::vector<ShaderAttribute> activeAttrs = activeShaderAttributes(prog.programId());
+   // Figure out shader locations for each point field
+   // TODO: attributeLocation() forces the OpenGL usage here to be
+   // synchronous.  Does this matter?  (Alternative: bind them ourselves.)
+   std::vector<const ShaderAttribute*> attributes;
+   for (size_t i = 0; i < m_fields.size(); ++i) {
+      const GeomField& field = m_fields[i];
+      if (field.spec.isArray()) {
+         for (int j = 0; j < field.spec.count; ++j) {
+            std::string name = tfm::format("%s[%d]", field.name, j);
+            attributes.push_back(findAttr(name, activeAttrs));
+         }
+      } else {
+         attributes.push_back(findAttr(field.name, activeAttrs));
+      }
+   }
+   // Zero out active attributes in case they don't have associated fields
+   GLfloat zeros[16] = {0};
+   for (size_t i = 0; i < activeAttrs.size(); ++i) {
+      prog.setAttributeValue((int)i, zeros, activeAttrs[i].rows,
+                             activeAttrs[i].cols);
+   }
+   // Enable attributes which have associated fields
+   for (size_t i = 0; i < attributes.size(); ++i) {
+      if (attributes[i])
+         glEnableVertexAttribArray(attributes[i]->location);
+   }
+
+   // Compute number of bytes required to store all attributes of a vertex, in
+   // bytes.
+   size_t perVertexBytes = 0;
+   for (size_t i = 0; i < m_fields.size(); ++i) {
+      const GeomField &field = m_fields[i];
+      unsigned int arraySize = field.spec.arraySize();
+      unsigned int vecSize = field.spec.vectorSize();
+      perVertexBytes += arraySize * vecSize * field.spec.elsize; //sizeof(glBaseType(field.spec));
+   }
+
+   DrawCount drawCount;
+   ClipBox clipBox(relativeTrans);
+
+   // Create a new uninitialized buffer for the current node, reserving
+   // enough space for the entire set of vertex attributes which will be
+   // passed to the shader.
+   //
+   // (This new memory area will be bound to the "point_buffer" VBO until
+   // the memory is orphaned by calling glBufferData() next time through
+   // the loop.  The orphaned memory should be cleaned up by the driver,
+   // and this may actually be quite efficient, see
+   // http://stackoverflow.com/questions/25111565/how-to-deallocate-glbufferdata-memory
+   // http://hacksoflife.blogspot.com.au/2015/06/glmapbuffer-no-longer-cool.html )
+   GLsizeiptr nodeBufferSize = perVertexBytes * m_npoints;
+   glBufferData(GL_ARRAY_BUFFER, nodeBufferSize, NULL, GL_STREAM_DRAW);
+
+   // Draw points in each bucket, with total number drawn depending on how far
+   // away the bucket is.  Since the points are shuffled, this corresponds to
+   // a stochastic simplification of the full point cloud.
+   V3f relCamera = relativeTrans.cameraPos();
+   std::vector<const OctreeNode*> nodeStack;
+   std::vector<unsigned short> ndIndStack;
+   std::vector<const OctreeNode*> parntNdStack;
+   std::vector<unsigned short> parntNdIndStack;
+   nodeStack.push_back(m_rootNode.get());
+   ndIndStack.push_back(0);
+   GLintptr bufferOffset = 0;
+   unsigned int verticesToDraw = m_npoints;
+   size_t ndStkInd = 0;
+   unsigned int avgNdDist = 10;
+   bool lastNodeIsLeaf = false;
+   std::vector<unsigned int> tris;
+   std::map<Point3,unsigned>  cgalPts;
+   while (!nodeStack.empty()) {
+      const OctreeNode* node = nodeStack.back();
+      const short ndInd = ndIndStack.back();
+      nodeStack.pop_back();
+      ndIndStack.pop_back();
+      if (clipBox.canCull(node->bbox))
+         continue;
+      if (node && !node->isLeaf()) {
+         if (lastNodeIsLeaf) {
+            parntNdStack.pop_back();
+            parntNdIndStack.pop_back();
+         }
+         parntNdStack.push_back(node);
+         parntNdIndStack.push_back(ndInd);
+         for (int i = 7; i >=0; --i) {
+            const OctreeNode* n = node->children[i];
+            if (n) {
+               nodeStack.push_back(n);
+               ndIndStack.push_back(i);
             }
-        } else {
-            attributes.push_back(findAttr(field.name, activeAttrs));
-        }
-    }
-    // Zero out active attributes in case they don't have associated fields
-    GLfloat zeros[16] = {0};
-    for (size_t i = 0; i < activeAttrs.size(); ++i) {
-        prog.setAttributeValue((int)i, zeros, activeAttrs[i].rows,
-                               activeAttrs[i].cols);
-    }
-    // Enable attributes which have associated fields
-    for (size_t i = 0; i < attributes.size(); ++i) {
-        if (attributes[i])
-            glEnableVertexAttribArray(attributes[i]->location);
-    }
-
-    // Compute number of bytes required to store all attributes of a vertex, in
-    // bytes.
-    size_t perVertexBytes = 0;
-    for (size_t i = 0; i < m_fields.size(); ++i) {
-        const GeomField &field = m_fields[i];
-        unsigned int arraySize = field.spec.arraySize();
-        unsigned int vecSize = field.spec.vectorSize();
-        perVertexBytes += arraySize * vecSize * field.spec.elsize; //sizeof(glBaseType(field.spec));
-    }
-
-    DrawCount drawCount;
-    ClipBox clipBox(relativeTrans);
-
-    // Create a new uninitialized buffer for the current node, reserving
-    // enough space for the entire set of vertex attributes which will be
-    // passed to the shader.
-    //
-    // (This new memory area will be bound to the "point_buffer" VBO until
-    // the memory is orphaned by calling glBufferData() next time through
-    // the loop.  The orphaned memory should be cleaned up by the driver,
-    // and this may actually be quite efficient, see
-    // http://stackoverflow.com/questions/25111565/how-to-deallocate-glbufferdata-memory
-    // http://hacksoflife.blogspot.com.au/2015/06/glmapbuffer-no-longer-cool.html )
-    GLsizeiptr nodeBufferSize = perVertexBytes * m_npoints;
-    glBufferData(GL_ARRAY_BUFFER, nodeBufferSize, NULL, GL_STREAM_DRAW);
-
-    // Draw points in each bucket, with total number drawn depending on how far
-    // away the bucket is.  Since the points are shuffled, this corresponds to
-    // a stochastic simplification of the full point cloud.
-    V3f relCamera = relativeTrans.cameraPos();
-    std::vector<const OctreeNode*> nodeStack;
-    std::vector<unsigned short> ndIndStack;
-    std::vector<const OctreeNode*> parntNdStack;
-    std::vector<unsigned short> parntNdIndStack;
-    nodeStack.push_back(m_rootNode.get());
-    ndIndStack.push_back(0);
-    GLintptr bufferOffset = 0;
-    unsigned int verticesToDraw = m_npoints;
-    size_t ndStkInd = 0;
-    unsigned int avgNdDist = 10;
-    while (!nodeStack.empty()) {
-        const OctreeNode* node = nodeStack.back();
-        const short ndInd = ndIndStack.back();
-        nodeStack.pop_back();
-        ndIndStack.pop_back();
-        if (clipBox.canCull(node->bbox))
-            continue;
-        if (node && !node->isLeaf()) {
-           parntNdStack.push_back(node);
-           parntNdIndStack.push_back(ndInd);
-           for (int i = 7; i >=0; --i) {
-                const OctreeNode* n = node->children[i];
-                if (n) {
-                   nodeStack.push_back(n);
-                   ndIndStack.push_back(i);
-                }
-            }
-            continue;
-        }
-
-        if (!incrementalDraw)
-           node->nextBeginIndex = node->beginIndex;
+         }
+         lastNodeIsLeaf=false;
+         continue;
+      }
+      lastNodeIsLeaf=true;
+      if (!incrementalDraw)
+         node->nextBeginIndex = node->beginIndex;
 
 //        if(node->endIndex<currentInd)
 //           break;
         
-        DrawCount nodeDrawCount
-           = node->drawCount(relCamera, quality, incrementalDraw);
-        drawCount += nodeDrawCount;
+      DrawCount nodeDrawCount
+         = node->drawCount(relCamera, quality, incrementalDraw);
+      drawCount += nodeDrawCount;
 
-        if (nodeDrawCount.numVertices == 0)
-            continue;
+      if (nodeDrawCount.numVertices == 0)
+         continue;
 
-        if (m_fields.size() < 1)
-            continue;
-        /*
+      if (m_fields.size() < 1)
+         continue;
+      /*
         g_logger.info("beginIndex: %d",node->beginIndex);
         g_logger.info("endIndex: %d",node->endIndex);
         g_logger.info("nextBeginIndex: %d",node->nextBeginIndex);
         g_logger.info("center: %f,%f,%f",
-                      node->center.x, node->center.y, node->center.z);
-        */
-        GLsizeiptr nodeBufferSize = perVertexBytes * nodeDrawCount.numVertices;
+        node->center.x, node->center.y, node->center.z);
+      */
+      GLsizeiptr nodeBufferSize = perVertexBytes * nodeDrawCount.numVertices;
 
-        GLintptr fieldOffset = 0;
-        for (
-           size_t i = 0, k = 0; i < m_fields.size(); k+=m_fields[i].spec.arraySize(), ++i
-        ) {
+      GLintptr fieldOffset = 0;
+      for (
+         size_t i = 0, k = 0; i < m_fields.size(); k+=m_fields[i].spec.arraySize(), ++i
+      ) {
 
-           const GeomField& field = m_fields[i];
-           int arraySize = field.spec.arraySize();
-           int vecSize = field.spec.vectorSize();
+         const GeomField& field = m_fields[i];
+         int arraySize = field.spec.arraySize();
+         int vecSize = field.spec.vectorSize();
 
-           // TODO?: Could use a single data-array that isn't split into
-           // vertex / normal / color / etc. sections, but has interleaved
-           // data ?  OpenGL has a stride value in glVertexAttribPointer for
-           // exactly this purpose, which should be used for better efficiency
-           // here we write only the current attribute data into this the
-           // buffer (e.g. all positions, then all colors)
-           GLsizeiptr fieldBufferSize =
-              arraySize * vecSize * field.spec.elsize * nodeDrawCount.numVertices;
+         // TODO?: Could use a single data-array that isn't split into
+         // vertex / normal / color / etc. sections, but has interleaved
+         // data ?  OpenGL has a stride value in glVertexAttribPointer for
+         // exactly this purpose, which should be used for better efficiency
+         // here we write only the current attribute data into this the
+         // buffer (e.g. all positions, then all colors)
+         GLsizeiptr fieldBufferSize =
+            arraySize * vecSize * field.spec.elsize * nodeDrawCount.numVertices;
 
-           // Upload raw data for `field` to the appropriate part of the buffer.
-           char* bufferData =
-              field.data.get() + node->nextBeginIndex*field.spec.size();
-           glBufferSubData(GL_ARRAY_BUFFER, bufferOffset, fieldBufferSize,
-                           bufferData);
-           /*
-             if (i==0)
-             g_logger.info("%d: %f,%f,%f",
-             node->beginIndex, ((V3f*)bufferData)->x,
-             ((V3f*)bufferData)->y, ((V3f*)bufferData)->z);
-           */
+         // Upload raw data for `field` to the appropriate part of the buffer.
+         char* bufferData =
+            field.data.get() + node->nextBeginIndex*field.spec.size();
+         glBufferSubData(GL_ARRAY_BUFFER, bufferOffset, fieldBufferSize,
+                         bufferData);
+         ///*
+         if (i==0) {
+            g_logger.info("%d: %f,%f,%f",
+                          node->beginIndex, ((V3f*)bufferData)->x,
+                          ((V3f*)bufferData)->y, ((V3f*)bufferData)->z);
+            cgalPts[Point3(((V3f*)bufferData)->x,
+                           ((V3f*)bufferData)->y, ((V3f*)bufferData)->z)]=ndStkInd;
+         }
+         //*/
 
-           // Tell OpenGL how to interpret the buffer of raw data which was
-           // just uploaded.  This should be a single call, but OpenGL spec
-           // insanity says we need `arraySize` calls (though arraySize=1
-           // for most usage.)
-           for (int j = 0; j < arraySize; ++j) {
-              if(j>1)
-                 g_logger.info("ind: %ld, array: %d!",
-                               node->beginIndex, j);
-              const ShaderAttribute* attr = attributes[k+j];
-              if (!attr)
-                 continue;
+         // Tell OpenGL how to interpret the buffer of raw data which was
+         // just uploaded.  This should be a single call, but OpenGL spec
+         // insanity says we need `arraySize` calls (though arraySize=1
+         // for most usage.)
+         for (int j = 0; j < arraySize; ++j) {
+            if(j>1)
+               g_logger.info("ind: %ld, array: %d!",
+                             node->beginIndex, j);
+            const ShaderAttribute* attr = attributes[k+j];
+            if (!attr)
+               continue;
 
-              GLintptr arrayElementOffset = fieldOffset + j*field.spec.elsize;
+            GLintptr arrayElementOffset = fieldOffset + j*field.spec.elsize;
 
-              if (
-                 attr->baseType == TypeSpec::Int ||
-                 attr->baseType == TypeSpec::Uint
-              ) {
-                 glVertexAttribIPointer(
-                    attr->location, vecSize, glBaseType(field.spec),
-                    0, (const GLvoid *)arrayElementOffset);
-              } else {
-                 glVertexAttribPointer(
-                    attr->location, vecSize, glBaseType(field.spec),
-                    field.spec.fixedPoint, perVertexBytes,
-                    (const GLvoid *)arrayElementOffset);
-              }
-           }
+            if (
+               attr->baseType == TypeSpec::Int ||
+               attr->baseType == TypeSpec::Uint
+            ) {
+               glVertexAttribIPointer(
+                  attr->location, vecSize, glBaseType(field.spec),
+                  0, (const GLvoid *)arrayElementOffset);
+            } else {
+               glVertexAttribPointer(
+                  attr->location, vecSize, glBaseType(field.spec),
+                  field.spec.fixedPoint, perVertexBytes,
+                  (const GLvoid *)arrayElementOffset);
+            }
+         }
 
-           fieldOffset += fieldBufferSize;
-           bufferOffset += fieldBufferSize;
-        }
+         fieldOffset += fieldBufferSize;
+         bufferOffset += fieldBufferSize;
+      }
         
     
       node->nextBeginIndex += nodeDrawCount.numVertices;
-      if(drawCount.numVertices>=verticesToDraw)
-         break;
     
 
       glDrawArrays(GL_POINTS, 0, (GLsizei)drawCount.numVertices);
-/*
 
+/*
       const OctreeNode* parntNd = parntNdStack.back();
       short parntNdInd = parntNdIndStack.back();
-      if (!node) {
-         if (ndInd==0) {
-            parntNdStack.pop_back();
-            parntNdIndStack.pop_back();
-         }
-         continue;
-      }
-      if(nodeDrawCount.numVertices>1)
+      if(nodeDrawCount.numVertices>1) {
          g_logger.info("ind: %ld, nVerts: %d!",
                        node->beginIndex, nodeDrawCount.numVertices);
+      }
+      for (int i=0; i<parntNdIndStack.size() ; ++i)
+         g_logger.info("%d", parntNdIndStack[i]);
+      g_logger.info("%d-----", ndInd);
       node->mVboIndex=ndStkInd;
+      ///*
       std::vector<const OctreeNode*> triNds;
       triNds.push_back(node);
       for (short mask=1; mask<8; ++mask) {
-         if (mask&ndInd==mask) {
-            short sibInd = (~mask) & ndInd;
+         short sibInd = (~mask) & ndInd;
+         if ((mask&ndInd)==mask) {
             const OctreeNode* sibNd = parntNd->children[sibInd];
             if (sibNd) {
                if (
                   ndMakesValidTri(triNds, sibNd)
                ) {
+                  g_logger.info("sib: %d", sibInd);
                   triNds.push_back(sibNd);
                }
             }
          } else {
             short lParntNdInd = parntNdInd;
             const OctreeNode* lParntNd = parntNd;
-            unsigned int treeHeight = parntNdStack.size()-1;
+            unsigned int treeHeight = parntNdStack.size();
             OctreeNode* parntSib = NULL;
+            short sibInd = (~mask) & ndInd;
             unsigned int sibHt = 0;
             // get parentnode whose child is mask compatible
-            while (treeHeight>1 && mask&lParntNdInd!=mask) {
+            while (treeHeight>1 && (mask&lParntNdInd)!=mask) {
                --treeHeight;
                lParntNdInd = parntNdIndStack[treeHeight];
                lParntNd = parntNdStack[treeHeight-1];
             }
-            if (treeHeight<=1)
+            if ((mask&lParntNdInd)!=mask)
                goto vertInsEnd;
             parntSib = lParntNd->children[ndInd];
-            sibHt = treeHeight+1;
-            while (true) {
-               if (parntSib->children[mask]) {
-                  parntSib=parntSib->children[mask];
+            sibHt = treeHeight;
+            while (sibHt<parntNdStack.size()) {
+               if (parntSib->children[sibInd]) {
+                  parntSib=parntSib->children[sibInd];
                   ++sibHt;
                } else {
                   break;
                }
-             
             }
+            g_logger.info("sib: %d", sibInd);
             triNds.push_back(parntSib);
            vertInsEnd:
          }
       }
+      std::sort(triNds.begin(), triNds.end());
+      auto it = std::unique(triNds.begin(), triNds.end());
+      triNds.erase(it,
+                   triNds.end());
       if (triNds.size()>=3) {
-         m_Tris.push_back(triNds[0]->mVboIndex);
-         m_Tris.push_back(triNds[1]->mVboIndex);
-         m_Tris.push_back(triNds[2]->mVboIndex);
-         for (int i=3; i<m_Tris.size(); ++i) {
+         tris.push_back(triNds[0]->mVboIndex);
+         tris.push_back(triNds[1]->mVboIndex);
+         tris.push_back(triNds[2]->mVboIndex);
+         for (int i=3; i<triNds.size(); ++i) {
             for (int j=1; j<i; ++j) {
-               m_Tris.push_back(triNds[0]->mVboIndex);
-               m_Tris.push_back(triNds[j]->mVboIndex);
-               m_Tris.push_back(triNds[i]->mVboIndex);
+               tris.push_back(triNds[0]->mVboIndex);
+               tris.push_back(triNds[j]->mVboIndex);
+               tris.push_back(triNds[i]->mVboIndex);
             }
          }
       }
-      if (ndInd==0) {
-         parntNdStack.pop_back();
-         parntNdIndStack.pop_back();
-      }
 */
+      
       ++ndStkInd;
-    }
-    
-    if (drawCount.numVertices>=3) { //renderAt) {
-       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-       // glEnable(GL_DEPTH_TEST);
-       //  glDepthFunc(GL_LEQUAL);
-       glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-       glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, (3*drawCount.numVertices-6)*sizeof(unsigned int), &m_Tris[0]);
-       //glDrawArrays(GL_TRIANGLES, 0, (GLsizei)drawCount.numVertices);
-       glDrawElements(
-          GL_TRIANGLES,      // mode
-          3*drawCount.numVertices-6,    // count
-          GL_UNSIGNED_INT,   // type
-          (void*)0           // element array buffer offset
-       );
-       g_logger.info("%d tris drawn, m_Tris[0]: %lu",
-                     m_Tris.size(),
-                     m_Tris[0]);
-       /*
-         for(int i=0; i< m_Tris.size(); ++i) {
-         ++m_Tris[i];
-         if(m_Tris[i]==m_npoints)
-         m_Tris[i]=0;
-         }
-       */
-    }
-    //tfm::printf("Drew %d of total points %d, quality %f\n", totDraw, m_npoints, quality);
+      if(drawCount.numVertices>=verticesToDraw)
+         break;
+   }
+   
+   if (drawCount.numVertices>=3) { //renderAt) {
+      DT3 dt3(cgalPts.begin(),cgalPts.end());
+      m_Tris.erase(m_Tris.begin(), m_Tris.end());
+      for (DT3::Finite_facets_iterator it = dt3.finite_facets_begin();
+           it != dt3.finite_facets_end(); ++it) {
+         for (int i=0; i<3; ++i)
+            m_Tris.push_back(cgalPts[it->first->vertex(i)->point()]);
+      }
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+      // glEnable(GL_DEPTH_TEST);
+      //  glDepthFunc(GL_LEQUAL);
+      glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                   m_Tris.size()*sizeof(unsigned), &m_Tris[0], GL_STATIC_DRAW);
+      //glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0,
+      //                tris.size()*sizeof(unsigned int), &tris[0]);
+      //glDrawArrays(GL_TRIANGLES, 0, (GLsizei)drawCount.numVertices);
+      glDrawElements(
+         GL_TRIANGLES,      // mode
+         m_Tris.size(),    // count
+         GL_UNSIGNED_INT,   // type
+         (void*)0           // element array buffer offset
+      );
+      for (int i=0;i<tris.size();++i)
+         g_logger.info("%lu",
+                       m_Tris[i]);
+      g_logger.info("%d tris drawn",
+                    m_Tris.size());
+      /*
+        for(int i=0; i< m_Tris.size(); ++i) {
+        ++m_Tris[i];
+        if(m_Tris[i]==m_npoints)
+        m_Tris[i]=0;
+        }
+      */
+   }
+   //tfm::printf("Drew %d of total points %d, quality %f\n", totDraw, m_npoints, quality);
 
-    // Disable all attribute arrays - leaving these enabled seems to screw with
-    // the OpenGL fixed function pipeline in unusual ways.
-    for (size_t i = 0; i < attributes.size(); ++i) {
-        if (attributes[i])
-            glDisableVertexAttribArray(attributes[i]->location);
-    }
+   // Disable all attribute arrays - leaving these enabled seems to screw with
+   // the OpenGL fixed function pipeline in unusual ways.
+   for (size_t i = 0; i < attributes.size(); ++i) {
+      if (attributes[i])
+         glDisableVertexAttribArray(attributes[i]->location);
+   }
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+   glBindBuffer(GL_ARRAY_BUFFER, 0);
+   glBindVertexArray(0);
 
-    return drawCount;
+   return drawCount;
 }

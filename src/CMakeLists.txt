@@ -150,6 +150,7 @@ target_link_libraries(displaz
     Qt5::Network Qt5::Widgets
     OpenGL::GL ${GLEW_LIBRARIES}
     ${ILMBASE_LIBRARIES}
+    gmp
 )
 if (TARGET displaz_com)
     target_link_libraries(displaz_com
