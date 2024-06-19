@@ -22,23 +22,11 @@
 #include <chrono>
 #include <thread>
 #include <iostream>
-#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
-#include <CGAL/Delaunay_triangulation_3.h>
-#include <CGAL/point_generators_3.h>
-#include <CGAL/draw_triangulation_3.h>
-#include <CGAL/Triangulation_vertex_base_with_info_3.h>
-#include <map>
 
 #include "ply_io.h"
 
 #include "ClipBox.h"
 
-typedef CGAL::Exact_predicates_inexact_constructions_kernel      K;
-typedef CGAL::Triangulation_vertex_base_with_info_3<unsigned, K> Vb;
-typedef CGAL::Triangulation_data_structure_3<Vb>                 Tds;
-typedef CGAL::Delaunay_triangulation_3<K, Tds>                   DT3;
-typedef K::Point_3                                               Point3;
-typedef CGAL::Creator_uniform_3<double,K::Point_3>               Creator;
 
 //------------------------------------------------------------------------------
 /// Functor to compute octree child node index with respect to some given split
@@ -819,8 +807,7 @@ DrawCount PointArray::drawPoints (
    size_t ndStkInd = 0;
    unsigned int avgNdDist = 10;
    bool lastNodeIsLeaf = false;
-   std::vector<unsigned int> tris;
-   std::map<Point3,unsigned>  cgalPts;
+   m_Tris.erase(m_Tris.begin(), m_Tris.end());
    while (!nodeStack.empty()) {
       const OctreeNode* node = nodeStack.back();
       const short ndInd = ndIndStack.back();
@@ -898,8 +885,6 @@ DrawCount PointArray::drawPoints (
             g_logger.info("%d: %f,%f,%f",
                           node->beginIndex, ((V3f*)bufferData)->x,
                           ((V3f*)bufferData)->y, ((V3f*)bufferData)->z);
-            cgalPts[Point3(((V3f*)bufferData)->x,
-                           ((V3f*)bufferData)->y, ((V3f*)bufferData)->z)]=ndStkInd;
          }
          //*/
 
@@ -1003,14 +988,14 @@ DrawCount PointArray::drawPoints (
       triNds.erase(it,
                    triNds.end());
       if (triNds.size()>=3) {
-         tris.push_back(triNds[0]->mVboIndex);
-         tris.push_back(triNds[1]->mVboIndex);
-         tris.push_back(triNds[2]->mVboIndex);
+         m_Tris.push_back(triNds[0]->mVboIndex);
+         m_Tris.push_back(triNds[1]->mVboIndex);
+         m_Tris.push_back(triNds[2]->mVboIndex);
          for (int i=3; i<triNds.size(); ++i) {
             for (int j=1; j<i; ++j) {
-               tris.push_back(triNds[0]->mVboIndex);
-               tris.push_back(triNds[j]->mVboIndex);
-               tris.push_back(triNds[i]->mVboIndex);
+               m_Tris.push_back(triNds[0]->mVboIndex);
+               m_Tris.push_back(triNds[j]->mVboIndex);
+               m_Tris.push_back(triNds[i]->mVboIndex);
             }
          }
       }
@@ -1022,13 +1007,6 @@ DrawCount PointArray::drawPoints (
    }
    
    if (drawCount.numVertices>=3) { //renderAt) {
-      DT3 dt3(cgalPts.begin(),cgalPts.end());
-      m_Tris.erase(m_Tris.begin(), m_Tris.end());
-      for (DT3::Finite_facets_iterator it = dt3.finite_facets_begin();
-           it != dt3.finite_facets_end(); ++it) {
-         for (int i=0; i<3; ++i)
-            m_Tris.push_back(cgalPts[it->first->vertex(i)->point()]);
-      }
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
       // glEnable(GL_DEPTH_TEST);
       //  glDepthFunc(GL_LEQUAL);
@@ -1036,7 +1014,7 @@ DrawCount PointArray::drawPoints (
       glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                    m_Tris.size()*sizeof(unsigned), &m_Tris[0], GL_STATIC_DRAW);
       //glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0,
-      //                tris.size()*sizeof(unsigned int), &tris[0]);
+      //                m_Tris.size()*sizeof(unsigned int), &m_Tris[0]);
       //glDrawArrays(GL_TRIANGLES, 0, (GLsizei)drawCount.numVertices);
       glDrawElements(
          GL_TRIANGLES,      // mode
@@ -1044,10 +1022,10 @@ DrawCount PointArray::drawPoints (
          GL_UNSIGNED_INT,   // type
          (void*)0           // element array buffer offset
       );
-      for (int i=0;i<tris.size();++i)
+      for (int i=0;i<m_Tris.size();++i)
          g_logger.info("%lu",
                        m_Tris[i]);
-      g_logger.info("%d tris drawn",
+      g_logger.info("%d m_Tris drawn",
                     m_Tris.size());
       /*
         for(int i=0; i< m_Tris.size(); ++i) {
