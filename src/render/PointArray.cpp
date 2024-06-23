@@ -353,7 +353,7 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
         return false;
     }
     m_P = (V3f*)m_fields[m_positionFieldIdx].as<float>();
-/*
+///*
     m_P[ 0]={00.0, 00.0, 00.0};
     m_P[ 1]={30.0, 00.0, 00.0};
     m_P[ 2]={00.0, 30.0, 00.0};
@@ -370,7 +370,7 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
     m_P[13]={20.0, 10.0, 20.0};
     m_P[14]={10.0, 20.0, 20.0};
     m_P[15]={20.0, 20.0, 20.0};
-*/
+//*/
     // Compute bounding box and centroid
     Imath::Box3d bbox;
     V3d centroid(0);
@@ -712,6 +712,82 @@ bool isInsideTetrahedron(V3f& a, V3f& b, V3f& c, V3f& d, V3f& p) {
     return std::abs(V - (V1 + V2 + V3 + V4)) < 1e-6;
 }
 
+void findNeighbours (
+   const OctreeNode* node, unsigned short ndInd,
+   std::vector<const OctreeNode*>& parntNdStack,
+   std::vector<unsigned short>& parntNdIndStack, unsigned short direction,
+   std::vector<const OctreeNode*>& triNds
+) {
+   const OctreeNode* parntNd = parntNdStack.back();
+   unsigned short parntNdInd = parntNdIndStack.back();
+   for (unsigned short mask=1; mask<8; ++mask) {
+      unsigned short sibInd = (~mask) & ndInd;
+      if ((direction | mask)!=direction)
+         continue;
+      if ((mask&ndInd)==mask) {
+         const OctreeNode* sibNd = parntNd->children[sibInd];
+         if (sibNd) {
+            if (
+               ndMakesValidTri(triNds, sibNd)
+            ) {
+               g_logger.info("sib: %d", sibInd);
+               triNds.push_back(sibNd);
+            }
+         } else {
+            findNeighbours(nullptr, sibInd, parntNdStack, parntNdIndStack,
+                           ndInd xor sibInd, triNds);
+         }
+      } else {
+         unsigned short lParntNdInd = parntNdInd;
+         unsigned short lNdInd=ndInd;
+         const OctreeNode* lParntNd = parntNd;
+         std::vector<const OctreeNode*> lParntNdStk = parntNdStack;
+         std::vector<unsigned short> lParntNdIndStk = parntNdIndStack;
+         unsigned int treeHeight = parntNdStack.size();
+         OctreeNode* csnNd = nullptr;
+         unsigned short csnInd = 0;
+         unsigned int csnHt = 0;
+         --treeHeight;
+         if (!treeHeight)
+            goto vertInsEnd;
+         lNdInd = parntNdIndStack[treeHeight];
+         lParntNd = parntNdStack[treeHeight-1];
+         // get parentnode whose child is mask compatible
+         while (treeHeight>1 && ((ndInd|lNdInd)&mask) != mask) {
+            --treeHeight;
+            lNdInd = parntNdIndStack[treeHeight];
+            lParntNd = parntNdStack[treeHeight-1];
+         }
+         if (((ndInd|lNdInd)&mask) != mask)
+            goto vertInsEnd;
+         csnInd = lNdInd & (~mask);
+         csnNd = lParntNd->children[csnInd];
+         csnHt = treeHeight;
+         lParntNdStk[csnHt]=csnNd;
+         lParntNdIndStk[csnHt]=csnInd;
+         ++csnHt;
+         csnInd = ndInd xor mask;
+         while (csnHt<parntNdStack.size()) {
+            if (csnNd->children[csnInd]) {
+               csnNd=csnNd->children[csnInd];
+               lParntNdStk[csnHt]=csnNd;
+               lParntNdIndStk[csnHt]=csnInd;
+               ++csnHt;
+            } else {
+               break;
+            }
+         }
+         csnNd=csnNd->children[csnInd];
+         g_logger.info("sib: %d", sibInd);
+         if (csnNd && csnHt>=parntNdStack.size())
+            triNds.push_back(csnNd);
+         else
+            findNeighbours(nullptr, csnInd, lParntNdStk, lParntNdIndStk,
+                           ndInd xor csnInd, triNds);
+        vertInsEnd:
+      }
+   }
+}
 
 DrawCount PointArray::drawPoints (
    QGLShaderProgram& prog, const TransformState& transState,
@@ -810,7 +886,7 @@ DrawCount PointArray::drawPoints (
    m_Tris.erase(m_Tris.begin(), m_Tris.end());
    while (!nodeStack.empty()) {
       const OctreeNode* node = nodeStack.back();
-      const short ndInd = ndIndStack.back();
+      const unsigned short ndInd = ndIndStack.back();
       nodeStack.pop_back();
       ndIndStack.pop_back();
       if (clipBox.canCull(node->bbox))
@@ -923,83 +999,22 @@ DrawCount PointArray::drawPoints (
         
     
       node->nextBeginIndex += nodeDrawCount.numVertices;
-    
 
       glDrawArrays(GL_POINTS, 0, (GLsizei)drawCount.numVertices);
 
-/*
-      const OctreeNode* parntNd = parntNdStack.back();
-      short parntNdInd = parntNdIndStack.back();
-      if(nodeDrawCount.numVertices>1) {
-         g_logger.info("ind: %ld, nVerts: %d!",
-                       node->beginIndex, nodeDrawCount.numVertices);
-      }
-      for (int i=0; i<parntNdIndStack.size() ; ++i)
-         g_logger.info("%d", parntNdIndStack[i]);
-      g_logger.info("%d-----", ndInd);
       node->mVboIndex=ndStkInd;
-      ///*
       std::vector<const OctreeNode*> triNds;
       triNds.push_back(node);
-      for (short mask=1; mask<8; ++mask) {
-         short sibInd = (~mask) & ndInd;
-         if ((mask&ndInd)==mask) {
-            const OctreeNode* sibNd = parntNd->children[sibInd];
-            if (sibNd) {
-               if (
-                  ndMakesValidTri(triNds, sibNd)
-               ) {
-                  g_logger.info("sib: %d", sibInd);
-                  triNds.push_back(sibNd);
-               }
-            }
-         } else {
-            short lParntNdInd = parntNdInd;
-            const OctreeNode* lParntNd = parntNd;
-            unsigned int treeHeight = parntNdStack.size();
-            OctreeNode* parntSib = NULL;
-            short sibInd = (~mask) & ndInd;
-            unsigned int sibHt = 0;
-            // get parentnode whose child is mask compatible
-            while (treeHeight>1 && (mask&lParntNdInd)!=mask) {
-               --treeHeight;
-               lParntNdInd = parntNdIndStack[treeHeight];
-               lParntNd = parntNdStack[treeHeight-1];
-            }
-            if ((mask&lParntNdInd)!=mask)
-               goto vertInsEnd;
-            parntSib = lParntNd->children[ndInd];
-            sibHt = treeHeight;
-            while (sibHt<parntNdStack.size()) {
-               if (parntSib->children[sibInd]) {
-                  parntSib=parntSib->children[sibInd];
-                  ++sibHt;
-               } else {
-                  break;
-               }
-            }
-            g_logger.info("sib: %d", sibInd);
-            triNds.push_back(parntSib);
-           vertInsEnd:
-         }
-      }
-      std::sort(triNds.begin(), triNds.end());
-      auto it = std::unique(triNds.begin(), triNds.end());
-      triNds.erase(it,
-                   triNds.end());
+      findNeighbours(node, ndInd, parntNdStack, parntNdIndStack, 0b111,
+                     triNds);
       if (triNds.size()>=3) {
-         m_Tris.push_back(triNds[0]->mVboIndex);
-         m_Tris.push_back(triNds[1]->mVboIndex);
-         m_Tris.push_back(triNds[2]->mVboIndex);
-         for (int i=3; i<triNds.size(); ++i) {
-            for (int j=1; j<i; ++j) {
-               m_Tris.push_back(triNds[0]->mVboIndex);
-               m_Tris.push_back(triNds[j]->mVboIndex);
-               m_Tris.push_back(triNds[i]->mVboIndex);
-            }
+         int ndCnt = triNds.size();
+         for (int i=0; i<ndCnt; ++i) {
+            m_Tris.push_back(triNds[i]->mVboIndex);
+            m_Tris.push_back(triNds[i+1>=ndCnt?i+1-ndCnt:i+1]->mVboIndex);
+            m_Tris.push_back(triNds[i+2>=ndCnt?i+2-ndCnt:i+2]->mVboIndex);
          }
       }
-*/
       
       ++ndStkInd;
       if(drawCount.numVertices>=verticesToDraw)

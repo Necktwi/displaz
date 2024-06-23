@@ -43,17 +43,19 @@
 // MainWindow implementation
 
 MainWindow::MainWindow(const QGLFormat& format)
-    : m_progressBar(0),
-    m_pointView(0),
-    m_shaderEditor(0),
-    m_helpDialog(0),
-    m_logTextView(0),
-    m_settings(QSettings::IniFormat, QSettings::UserScope, QCoreApplication::organizationName(), QCoreApplication::applicationName()),
-      //m_maxPointCount(200*1000*1000), // 200 million
-      m_maxPointCount(1000), // 200 million
-    m_geometries(0),
-    m_ipcServer(0),
-    m_hookManager(0)
+: m_progressBar(0),
+  m_pointView(0),
+  m_shaderEditor(0),
+  m_helpDialog(0),
+  m_logTextView(0),
+  m_settings(QSettings::IniFormat, QSettings::UserScope,
+             QCoreApplication::organizationName(),
+             QCoreApplication::applicationName()),
+  //m_maxPointCount(200*1000*1000), // 200 million
+  m_maxPointCount(16), // 200 million
+  m_geometries(0),
+  m_ipcServer(0),
+  m_hookManager(0)
 {
 #ifndef _WIN32
     setWindowIcon(QIcon(":resource/displaz_icon_256.png"));
