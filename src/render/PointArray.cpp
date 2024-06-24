@@ -1032,7 +1032,8 @@ DrawCount PointArray::drawPoints (
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
       // glEnable(GL_DEPTH_TEST);
       //  glDepthFunc(GL_LEQUAL);
-      glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+      //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+      glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
       glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                    m_Tris.size()*sizeof(unsigned), &m_Tris[0], GL_STATIC_DRAW);
       //glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0,
