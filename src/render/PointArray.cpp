@@ -353,7 +353,7 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
         return false;
     }
     m_P = (V3f*)m_fields[m_positionFieldIdx].as<float>();
-///*
+/*
     m_P[ 0]={00.0, 00.0, 00.0};
     m_P[ 1]={30.0, 00.0, 00.0};
     m_P[ 2]={00.0, 30.0, 00.0};
@@ -370,8 +370,29 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
     m_P[13]={20.0, 10.0, 20.0};
     m_P[14]={10.0, 20.0, 20.0};
     m_P[15]={20.0, 20.0, 20.0};
-//*/
-    // Compute bounding box and centroid
+    m_P[16]={13.3, 13.3, 13.3};
+    m_P[17]={16.6, 13.3, 13.3};
+    m_P[18]={13.3, 16.6, 13.3};
+    m_P[19]={16.6, 16.6, 13.3};
+    m_P[20]={13.3, 13.3, 16.6};
+    m_P[21]={16.6, 13.3, 16.6};
+    m_P[22]={13.3, 16.6, 16.6};
+    m_P[23]={16.6, 16.6, 16.6};
+*/
+    m_P[ 0]={00.0, 00.0, 00.0};
+    m_P[ 1]={30.0, 00.0, 00.0};
+    m_P[ 2]={00.0, 30.0, 00.0};
+    m_P[ 3]={30.0, 30.0, 00.0};
+    m_P[ 4]={10.0, 10.0, 00.0};
+    m_P[ 5]={20.0, 10.0, 00.0};
+    m_P[ 6]={10.0, 20.0, 00.0};
+    m_P[ 7]={20.0, 20.0, 00.0};
+    m_P[ 8]={13.3, 13.3, 00.0};
+    m_P[ 9]={16.6, 13.3, 00.0};
+    m_P[10]={13.3, 16.6, 00.0};
+    m_P[11]={16.6, 16.6, 00.0};
+
+// Compute bounding box and centroid
     Imath::Box3d bbox;
     V3d centroid(0);
     V3d Psum(0);
@@ -777,7 +798,8 @@ void findNeighbours (
                break;
             }
          }
-         csnNd=csnNd->children[csnInd];
+         if (csnNd->children[csnInd])
+            csnNd=csnNd->children[csnInd];
          g_logger.info("sib: %d", sibInd);
          if (csnNd && csnHt>=parntNdStack.size())
             triNds.push_back(csnNd);
@@ -1005,8 +1027,9 @@ DrawCount PointArray::drawPoints (
       node->mVboIndex=ndStkInd;
       std::vector<const OctreeNode*> triNds;
       triNds.push_back(node);
-      findNeighbours(node, ndInd, parntNdStack, parntNdIndStack, 0b111,
-                     triNds);
+      unsigned short parntNdInd =  parntNdIndStack.back();
+      //findNeighbours(node, ndInd, parntNdStack, parntNdIndStack, 0b111,
+      //               triNds);
       if (triNds.size()>=3) {
          int ndCnt = triNds.size();
          for (int i=0; i<ndCnt; ++i) {

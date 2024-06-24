@@ -52,7 +52,7 @@ MainWindow::MainWindow(const QGLFormat& format)
              QCoreApplication::organizationName(),
              QCoreApplication::applicationName()),
   //m_maxPointCount(200*1000*1000), // 200 million
-  m_maxPointCount(16), // 200 million
+  m_maxPointCount(12), // 200 million
   m_geometries(0),
   m_ipcServer(0),
   m_hookManager(0)
