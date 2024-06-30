@@ -417,7 +417,6 @@ bool PointArray::loadFile(QString fileName, size_t maxPointCount)
         m_rootNode.reset(new OctreeNode(V3f(0), 1));
         return true;
     }
-    currentInd=m_npoints;
     // Sort points into octree order
     emit loadStepStarted("Sorting points");
     std::unique_ptr<size_t[]> inds(new size_t[m_npoints]);
@@ -733,6 +732,23 @@ bool isInsideTetrahedron(V3f& a, V3f& b, V3f& c, V3f& d, V3f& p) {
     return std::abs(V - (V1 + V2 + V3 + V4)) < 1e-6;
 }
 
+std::vector<unsigned short> ldrNdIndStk;
+
+unsigned int findChittiNeighbours (const OctreeNode* nd, unsigned short mask,
+                                   std::vector<const OctreeNode*>& triNds) {
+   unsigned int count=0;
+   if (nd->isLeaf()) {
+      triNds.push_back(nd);
+      return 1;
+   }
+   for (unsigned short i=0; i<8; ++i) {
+      if ((i&mask) && nd->children[i]) {
+         count+=findChittiNeighbours(nd->children[i], mask, triNds);
+      }
+   }
+   return count;
+}
+
 void findNeighbours (
    const OctreeNode* node, unsigned short ndInd,
    std::vector<const OctreeNode*>& parntNdStack,
@@ -751,7 +767,7 @@ void findNeighbours (
             if (
                ndMakesValidTri(triNds, sibNd)
             ) {
-               g_logger.info("sib: %d", sibInd);
+               //g_logger.info("sib: %d", sibInd);
                triNds.push_back(sibNd);
             }
          } else {
@@ -768,6 +784,9 @@ void findNeighbours (
          OctreeNode* csnNd = nullptr;
          unsigned short csnInd = 0;
          unsigned int csnHt = 0;
+         unsigned int shlwHt;
+         int i=0;
+         bool cmnFnd = false;
          --treeHeight;
          if (!treeHeight)
             goto vertInsEnd;
@@ -783,30 +802,73 @@ void findNeighbours (
             goto vertInsEnd;
          csnInd = lNdInd & (~mask);
          csnNd = lParntNd->children[csnInd];
+         if (!csnNd) {
+            while (treeHeight<parntNdStack.size()) {
+               lParntNdStk.pop_back();
+               lParntNdIndStk.pop_back();
+               ++treeHeight;
+            }
+            sibInd = mask;
+            goto vertIns;
+         }
          csnHt = treeHeight;
          lParntNdStk[csnHt]=csnNd;
          lParntNdIndStk[csnHt]=csnInd;
          ++csnHt;
-         csnInd = ndInd xor mask;
-         while (csnHt<parntNdStack.size()) {
-            if (csnNd->children[csnInd]) {
-               csnNd=csnNd->children[csnInd];
+         if (csnHt<parntNdStack.size())
+            csnInd=parntNdIndStack[csnHt];
+         else
+            csnInd=ndInd;
+         csnInd = csnInd xor mask;
+         while (csnNd->children[csnInd] ||
+                (csnHt>=lParntNdStk.size() && !csnNd->isLeaf())) {
+            csnNd=csnNd->children[csnInd];
+            if (csnNd && csnHt<lParntNdStk.size()) {
                lParntNdStk[csnHt]=csnNd;
                lParntNdIndStk[csnHt]=csnInd;
-               ++csnHt;
             } else {
+               if (csnNd && !csnNd->isLeaf())
+                  csnHt+=findChittiNeighbours(csnNd, csnInd, triNds);
                break;
             }
+            ++csnHt;
+            if (csnHt<parntNdStack.size())
+               csnInd=parntNdIndStack[csnHt];
+            else
+               csnInd=ndInd;
+            csnInd = csnInd xor mask;
          }
-         if (csnNd->children[csnInd])
-            csnNd=csnNd->children[csnInd];
-         g_logger.info("sib: %d", sibInd);
-         if (csnNd && csnHt>=parntNdStack.size())
+         printf("sib: %d; ", sibInd);
+         sibInd = ndInd xor csnInd;
+        vertIns:
+         if (ndInd==2 && parntNdInd==2) {
+            printf("break\n");
+         }
+         parntNdIndStack.push_back(ndInd);
+         shlwHt = parntNdIndStack.size()<ldrNdIndStk.size()?
+            parntNdIndStack.size():ldrNdIndStk.size();
+         for (; i<shlwHt; ++i) {
+            if (parntNdIndStack[i]!=ldrNdIndStk[i] && !cmnFnd) {
+               cmnFnd=true;
+            }
+            if (cmnFnd) {
+               short cNdInd = parntNdIndStack[i];
+               short ldrNdInd = ldrNdIndStk[i];
+               if ((~cNdInd)&ldrNdInd) {
+                  parntNdIndStack.pop_back();
+                  goto vertInsEnd;
+               }
+            }
+         }
+         parntNdIndStack.pop_back();
+         if (csnNd && csnNd->isLeaf())
             triNds.push_back(csnNd);
-         else
+         else if (csnHt<=lParntNdStk.size()) {
             findNeighbours(nullptr, csnInd, lParntNdStk, lParntNdIndStk,
-                           ndInd xor csnInd, triNds);
+                           sibInd, triNds);
+         }
         vertInsEnd:
+         
       }
    }
 }
@@ -827,8 +889,8 @@ DrawCount PointArray::drawPoints (
    renderAt=0;
    if(nowtm-before>=2){
       before=nowtm;
-      --currentInd;
-      if(currentInd==0)currentInd=m_npoints;
+      ++currentInd;
+      if(currentInd==m_npoints)currentInd=0;
       renderAt=1;
       g_logger.info("currentInd: %ld",currentInd);
    };
@@ -898,45 +960,68 @@ DrawCount PointArray::drawPoints (
    std::vector<unsigned short> ndIndStack;
    std::vector<const OctreeNode*> parntNdStack;
    std::vector<unsigned short> parntNdIndStack;
+   std::vector<unsigned short> parntNdCntStack;
    nodeStack.push_back(m_rootNode.get());
    ndIndStack.push_back(0);
    GLintptr bufferOffset = 0;
    unsigned int verticesToDraw = m_npoints;
    size_t ndStkInd = 0;
    unsigned int avgNdDist = 10;
-   bool lastNodeIsLeaf = false;
    m_Tris.erase(m_Tris.begin(), m_Tris.end());
    while (!nodeStack.empty()) {
       const OctreeNode* node = nodeStack.back();
       const unsigned short ndInd = ndIndStack.back();
+      short count;
       nodeStack.pop_back();
       ndIndStack.pop_back();
       if (clipBox.canCull(node->bbox))
          continue;
-      if (node && !node->isLeaf()) {
-         if (lastNodeIsLeaf) {
-            parntNdStack.pop_back();
-            parntNdIndStack.pop_back();
+      if (!node->isLeaf()) {
+         if (parntNdCntStack.size()) {
+            count = parntNdCntStack.back();
+            while (count==0) {
+               parntNdStack.pop_back();
+               parntNdIndStack.pop_back();
+               parntNdCntStack.pop_back();
+               count = parntNdCntStack.back();
+               --count;
+               if (count) {
+                  parntNdCntStack.pop_back();
+                  parntNdCntStack.push_back(count);
+               }
+            }
          }
          parntNdStack.push_back(node);
          parntNdIndStack.push_back(ndInd);
+         count=0;
          for (int i = 7; i >=0; --i) {
             const OctreeNode* n = node->children[i];
             if (n) {
                nodeStack.push_back(n);
                ndIndStack.push_back(i);
+               ++count;
             }
          }
-         lastNodeIsLeaf=false;
+         parntNdCntStack.push_back(count);
          continue;
       }
-      lastNodeIsLeaf=true;
+      count = parntNdCntStack.back();
+      while (count==0) {
+         parntNdStack.pop_back();
+         parntNdIndStack.pop_back();
+         parntNdCntStack.pop_back();
+         count = parntNdCntStack.back();
+         --count;
+      }
+      parntNdCntStack.pop_back();
+      --count;
+      parntNdCntStack.push_back(count);
       if (!incrementalDraw)
          node->nextBeginIndex = node->beginIndex;
 
-//        if(node->endIndex<currentInd)
-//           break;
-        
+      // if (ndStkInd>currentInd) {
+      //    break;
+      // }
       DrawCount nodeDrawCount
          = node->drawCount(relCamera, quality, incrementalDraw);
       drawCount += nodeDrawCount;
@@ -979,9 +1064,14 @@ DrawCount PointArray::drawPoints (
          glBufferSubData(GL_ARRAY_BUFFER, bufferOffset, fieldBufferSize,
                          bufferData);
          ///*
-         if (i==0) {
-            g_logger.info("%d: %f,%f,%f",
-                          node->beginIndex, ((V3f*)bufferData)->x,
+         if (i==0 && ndStkInd==currentInd) {
+            std::string s=std::to_string(ndInd);
+            for (int i=parntNdIndStack.size()-1; i>=0; --i) {
+               s += ",";
+               s += std::to_string(parntNdIndStack[i]);
+            }
+            g_logger.info("%d: %d: %s: %f,%f,%f", ndStkInd,
+                          node->beginIndex, s.c_str(), ((V3f*)bufferData)->x,
                           ((V3f*)bufferData)->y, ((V3f*)bufferData)->z);
          }
          //*/
@@ -1028,8 +1118,10 @@ DrawCount PointArray::drawPoints (
       std::vector<const OctreeNode*> triNds;
       triNds.push_back(node);
       unsigned short parntNdInd =  parntNdIndStack.back();
-      //findNeighbours(node, ndInd, parntNdStack, parntNdIndStack, 0b111,
-      //               triNds);
+      findNeighbours(node, ndInd, parntNdStack, parntNdIndStack, 0b111,
+                     triNds);
+      ldrNdIndStk=parntNdIndStack;
+      ldrNdIndStk.push_back(ndInd);
       if (triNds.size()>=3) {
          int ndCnt = triNds.size();
          for (int i=0; i<ndCnt; ++i) {
@@ -1044,7 +1136,7 @@ DrawCount PointArray::drawPoints (
          break;
    }
    
-   if (drawCount.numVertices>=3) { //renderAt) {
+   if (m_Tris.size()) { //renderAt) {
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
       // glEnable(GL_DEPTH_TEST);
       //  glDepthFunc(GL_LEQUAL);
