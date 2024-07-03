@@ -79,6 +79,7 @@ class PointArray : public Geometry
         size_t m_npoints;
         /// Total tries generated
         mutable std::vector<unsigned int> m_Tris;
+   mutable DrawCount mDrawCount;
         /// Spatial hierarchy
         std::unique_ptr<OctreeNode> m_rootNode;
         /// Point data field storage

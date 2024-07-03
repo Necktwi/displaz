@@ -23,39 +23,48 @@
 #include <thread>
 #include <iostream>
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
-#include <CGAL/Delaunay_triangulation_3.h>
-#include <CGAL/point_generators_3.h>
-#include <CGAL/draw_triangulation_3.h>
-#include <CGAL/Triangulation_vertex_base_with_info_3.h>
+#include <CGAL/Projection_traits_xy_3.h>
+#include <CGAL/Delaunay_triangulation_2.h>
+#include <CGAL/boost/graph/graph_traits_Delaunay_triangulation_2.h>
+#include <CGAL/boost/graph/copy_face_graph.h>
+#include <CGAL/Simple_cartesian.h>
+#include <CGAL/Surface_mesh.h>
+#include <CGAL/Delaunay_triangulation_2.h>
+#include <CGAL/point_generators_2.h>
+#include <CGAL/Triangulation_vertex_base_with_info_2.h>
+#include <CGAL/Triangulation_face_base_with_info_2.h>
 #include <map>
 
 #include "ply_io.h"
 
 #include "ClipBox.h"
 
-typedef CGAL::Exact_predicates_inexact_constructions_kernel      K;
-typedef CGAL::Triangulation_vertex_base_with_info_3<unsigned, K> Vb;
-typedef CGAL::Triangulation_data_structure_3<Vb>                 Tds;
-typedef CGAL::Delaunay_triangulation_3<K, Tds>                   DT3;
-typedef K::Point_3                                               Point3;
-typedef CGAL::Creator_uniform_3<double,K::Point_3>               Creator;
+typedef CGAL::Exact_predicates_inexact_constructions_kernel            K;
+typedef CGAL::Projection_traits_xy_3<K>                                PrjTrts;
+typedef CGAL::Triangulation_vertex_base_with_info_2<unsigned, PrjTrts> Vb2;
+typedef CGAL::Triangulation_face_base_with_info_2<int, PrjTrts>        Fb2;
+typedef K::Point_3                                                     Point3;
+typedef CGAL::Surface_mesh<Point3>                                     Mesh;
+typedef CGAL::Triangulation_data_structure_2<Vb2>                      T2ds;
+//typedef CGAL::Triangulation_data_structure_2<Vb2, Fb2>                 T2ds;
+typedef CGAL::Delaunay_triangulation_2<PrjTrts, T2ds>                  TIN;
+//typedef CGAL::Delaunay_triangulation_2<PrjTrts>                        TIN;
 
-//------------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 /// Functor to compute octree child node index with respect to some given split
 /// point
-struct OctreeChildIdx
-{
+struct OctreeChildIdx {
     const V3f* m_P;
     V3f m_center;
-    int operator()(size_t i)
-    {
+    int operator() (size_t i) {
         V3f p = m_P[i];
         return 4*(p.z >= m_center.z) +
                2*(p.y >= m_center.y) +
                  (p.x >= m_center.x);
     }
 
-    OctreeChildIdx(const V3f* P, const V3f& center) : m_P(P), m_center(center) {}
+    OctreeChildIdx(const V3f* P, const V3f& center)
+    : m_P(P), m_center(center) {}
 };
 
 
@@ -68,13 +77,13 @@ struct OctreeNode {
    V3f center;              ///< center of the node
    float halfWidth;         ///< Half the axis-aligned width of the node.
    mutable size_t mVboIndex;
-   OctreeNode(const V3f& center, float halfWidth)
-      : beginIndex(0), endIndex(0), nextBeginIndex(0),
-        center(center), halfWidth(halfWidth), mVboIndex(0)
-      {
-         for (int i = 0; i < 8; ++i)
-            children[i] = 0;
-      }
+   OctreeNode(const V3f& center, float halfWidth) :
+      beginIndex(0), endIndex(0), nextBeginIndex(0),
+      center(center), halfWidth(halfWidth), mVboIndex(0)
+   {
+      for (int i = 0; i < 8; ++i)
+         children[i] = 0;
+   }
 
    ~OctreeNode()
       {
@@ -788,7 +797,7 @@ DrawCount PointArray::drawPoints (
       perVertexBytes += arraySize * vecSize * field.spec.elsize; //sizeof(glBaseType(field.spec));
    }
 
-   DrawCount drawCount;
+   //mDrawCount={0};
    ClipBox clipBox(relativeTrans);
 
    // Create a new uninitialized buffer for the current node, reserving
@@ -820,10 +829,14 @@ DrawCount PointArray::drawPoints (
    unsigned int avgNdDist = 10;
    bool lastNodeIsLeaf = false;
    std::vector<unsigned int> tris;
-   std::map<Point3,unsigned>  cgalPts;
+   std::map<Point3, unsigned>  cgalPts;
+   const OctreeNode* node = nodeStack.back();
+   short ndInd = ndIndStack.back();
+   if (m_Tris.size())
+      goto draw;
    while (!nodeStack.empty()) {
-      const OctreeNode* node = nodeStack.back();
-      const short ndInd = ndIndStack.back();
+      node = nodeStack.back();
+      ndInd = ndIndStack.back();
       nodeStack.pop_back();
       ndIndStack.pop_back();
       if (clipBox.canCull(node->bbox))
@@ -854,7 +867,7 @@ DrawCount PointArray::drawPoints (
         
       DrawCount nodeDrawCount
          = node->drawCount(relCamera, quality, incrementalDraw);
-      drawCount += nodeDrawCount;
+      mDrawCount += nodeDrawCount;
 
       if (nodeDrawCount.numVertices == 0)
          continue;
@@ -898,8 +911,11 @@ DrawCount PointArray::drawPoints (
             g_logger.info("%d: %f,%f,%f",
                           node->beginIndex, ((V3f*)bufferData)->x,
                           ((V3f*)bufferData)->y, ((V3f*)bufferData)->z);
-            cgalPts[Point3(((V3f*)bufferData)->x,
-                           ((V3f*)bufferData)->y, ((V3f*)bufferData)->z)]=ndStkInd;
+            Point3 p3(((V3f*)bufferData)->x,
+                      ((V3f*)bufferData)->y,
+                      ((V3f*)bufferData)->z);
+            cgalPts[p3]=ndStkInd;
+            //cgalPts.push_back(p3);
          }
          //*/
 
@@ -935,107 +951,40 @@ DrawCount PointArray::drawPoints (
          fieldOffset += fieldBufferSize;
          bufferOffset += fieldBufferSize;
       }
-        
-    
+      
       node->nextBeginIndex += nodeDrawCount.numVertices;
-    
-
-      glDrawArrays(GL_POINTS, 0, (GLsizei)drawCount.numVertices);
-
-/*
-      const OctreeNode* parntNd = parntNdStack.back();
-      short parntNdInd = parntNdIndStack.back();
-      if(nodeDrawCount.numVertices>1) {
-         g_logger.info("ind: %ld, nVerts: %d!",
-                       node->beginIndex, nodeDrawCount.numVertices);
-      }
-      for (int i=0; i<parntNdIndStack.size() ; ++i)
-         g_logger.info("%d", parntNdIndStack[i]);
-      g_logger.info("%d-----", ndInd);
-      node->mVboIndex=ndStkInd;
-      ///*
-      std::vector<const OctreeNode*> triNds;
-      triNds.push_back(node);
-      for (short mask=1; mask<8; ++mask) {
-         short sibInd = (~mask) & ndInd;
-         if ((mask&ndInd)==mask) {
-            const OctreeNode* sibNd = parntNd->children[sibInd];
-            if (sibNd) {
-               if (
-                  ndMakesValidTri(triNds, sibNd)
-               ) {
-                  g_logger.info("sib: %d", sibInd);
-                  triNds.push_back(sibNd);
-               }
-            }
-         } else {
-            short lParntNdInd = parntNdInd;
-            const OctreeNode* lParntNd = parntNd;
-            unsigned int treeHeight = parntNdStack.size();
-            OctreeNode* parntSib = NULL;
-            short sibInd = (~mask) & ndInd;
-            unsigned int sibHt = 0;
-            // get parentnode whose child is mask compatible
-            while (treeHeight>1 && (mask&lParntNdInd)!=mask) {
-               --treeHeight;
-               lParntNdInd = parntNdIndStack[treeHeight];
-               lParntNd = parntNdStack[treeHeight-1];
-            }
-            if ((mask&lParntNdInd)!=mask)
-               goto vertInsEnd;
-            parntSib = lParntNd->children[ndInd];
-            sibHt = treeHeight;
-            while (sibHt<parntNdStack.size()) {
-               if (parntSib->children[sibInd]) {
-                  parntSib=parntSib->children[sibInd];
-                  ++sibHt;
-               } else {
-                  break;
-               }
-            }
-            g_logger.info("sib: %d", sibInd);
-            triNds.push_back(parntSib);
-           vertInsEnd:
-         }
-      }
-      std::sort(triNds.begin(), triNds.end());
-      auto it = std::unique(triNds.begin(), triNds.end());
-      triNds.erase(it,
-                   triNds.end());
-      if (triNds.size()>=3) {
-         tris.push_back(triNds[0]->mVboIndex);
-         tris.push_back(triNds[1]->mVboIndex);
-         tris.push_back(triNds[2]->mVboIndex);
-         for (int i=3; i<triNds.size(); ++i) {
-            for (int j=1; j<i; ++j) {
-               tris.push_back(triNds[0]->mVboIndex);
-               tris.push_back(triNds[j]->mVboIndex);
-               tris.push_back(triNds[i]->mVboIndex);
-            }
-         }
-      }
-*/
+      
+      glDrawArrays(GL_POINTS, 0, (GLsizei)mDrawCount.numVertices);
       
       ++ndStkInd;
-      if(drawCount.numVertices>=verticesToDraw)
+      if(mDrawCount.numVertices>=verticesToDraw)
          break;
    }
-   
-   if (drawCount.numVertices>=3) { //renderAt) {
-      DT3 dt3(cgalPts.begin(),cgalPts.end());
-      m_Tris.erase(m_Tris.begin(), m_Tris.end());
-      for (DT3::Finite_facets_iterator it = dt3.finite_facets_begin();
-           it != dt3.finite_facets_end(); ++it) {
-         for (int i=0; i<3; ++i)
-            m_Tris.push_back(cgalPts[it->first->vertex(i)->point()]);
+   mDrawCount.moreToDraw=1;
+  draw:
+   if (mDrawCount.numVertices>=3) { //renderAt) {
+      glDrawArrays(GL_POINTS, 0, (GLsizei)mDrawCount.numVertices);
+      if (!m_Tris.size()) {
+         TIN dsm(cgalPts.begin(), cgalPts.end());
+         Mesh sm;
+         CGAL::copy_face_graph(dsm, sm);
+         m_Tris.erase(m_Tris.begin(), m_Tris.end());
+         for (Mesh::Face_index fi : sm.faces()) {
+            for (Mesh::Vertex_index vi:
+                    vertices_around_face(sm.halfedge(fi), sm)) {
+               m_Tris.push_back(cgalPts[sm.point(vi)]);
+            }
+         }
       }
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
       // glEnable(GL_DEPTH_TEST);
       //  glDepthFunc(GL_LEQUAL);
       //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
       glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-      glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                   m_Tris.size()*sizeof(unsigned), &m_Tris[0], GL_STATIC_DRAW);
+      if(mDrawCount.moreToDraw)
+         glBufferData(
+            GL_ELEMENT_ARRAY_BUFFER,
+            m_Tris.size()*sizeof(unsigned), &m_Tris[0], GL_STATIC_DRAW);
       //glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0,
       //                tris.size()*sizeof(unsigned int), &tris[0]);
       //glDrawArrays(GL_TRIANGLES, 0, (GLsizei)drawCount.numVertices);
@@ -1045,6 +994,7 @@ DrawCount PointArray::drawPoints (
          GL_UNSIGNED_INT,   // type
          (void*)0           // element array buffer offset
       );
+      mDrawCount.moreToDraw=0;
       for (int i=0;i<tris.size();++i)
          g_logger.info("%lu",
                        m_Tris[i]);
@@ -1070,5 +1020,5 @@ DrawCount PointArray::drawPoints (
    glBindBuffer(GL_ARRAY_BUFFER, 0);
    glBindVertexArray(0);
 
-   return drawCount;
+   return mDrawCount;
 }
