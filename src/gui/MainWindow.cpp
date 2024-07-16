@@ -39,7 +39,7 @@
 #include <QMimeData>
 #include <QGLFormat>
 
-//------------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
 // MainWindow implementation
 
 MainWindow::MainWindow(const QGLFormat& format)
@@ -49,8 +49,8 @@ MainWindow::MainWindow(const QGLFormat& format)
     m_helpDialog(0),
     m_logTextView(0),
     m_settings(QSettings::IniFormat, QSettings::UserScope, QCoreApplication::organizationName(), QCoreApplication::applicationName()),
-      //m_maxPointCount(200*1000*1000), // 200 million
-      m_maxPointCount(100000), // 200 million
+    m_maxPointCount(200*1000*1000), // 200 million
+//    m_maxPointCount(220000), // 200 million
     m_geometries(0),
     m_ipcServer(0),
     m_hookManager(0)

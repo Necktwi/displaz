@@ -13,7 +13,6 @@
 
 #include <functional>
 #include <algorithm>
-#include <unordered_map>
 #include <fstream>
 #include <random>
 #include <queue>
@@ -76,29 +75,27 @@ struct OctreeNode {
    Imath::Box3f bbox;       ///< Actual bounding box of points in node
    V3f center;              ///< center of the node
    float halfWidth;         ///< Half the axis-aligned width of the node.
-   mutable size_t mVboIndex;
+   size_t representative;
    OctreeNode(const V3f& center, float halfWidth) :
       beginIndex(0), endIndex(0), nextBeginIndex(0),
-      center(center), halfWidth(halfWidth), mVboIndex(0)
+      center(center), halfWidth(halfWidth), representative(0)
    {
       for (int i = 0; i < 8; ++i)
          children[i] = 0;
    }
 
-   ~OctreeNode()
-      {
-         for (int i = 0; i < 8; ++i)
-            delete children[i];
-      }
+   ~OctreeNode() {
+      for (int i = 0; i < 8; ++i)
+         delete children[i];
+   }
 
    size_t findNearest(const EllipticalDist& distFunc,
                       const V3d& offset, const V3f* p,
-                      double& dist) const
-      {
-         return beginIndex + distFunc.findNearest(offset, p + beginIndex,
-                                                  endIndex - beginIndex,
-                                                  &dist);
-      }
+                      double& dist) const {
+      return beginIndex + distFunc.findNearest(offset, p + beginIndex,
+                                               endIndex - beginIndex,
+                                               &dist);
+   }
 
    size_t size() const { return endIndex - beginIndex; }
 
@@ -110,27 +107,25 @@ struct OctreeNode {
    /// Returns estimate of primitive draw count and whether there's anything
    /// more to draw.
    DrawCount drawCount(const V3f& relCamera,
-                       double quality, bool incrementalDraw) const
-      {
-         assert(isLeaf());
-         const double drawAllDist = 100;
-         double dist = (this->bbox.center() - relCamera).length();
-         double diagRadius = this->bbox.size().length()/2;
-         // Subtract bucket diagonal dist, since we really want an approx
-         // distance to closest point in the bucket, rather than dist to center.
-         dist = std::max(10.0, dist - diagRadius);
-         double desiredFraction = std::min(1.0, quality*pow(drawAllDist/dist, 2));
-         size_t chunkSize = (size_t)ceil(this->size()*desiredFraction);
-         DrawCount drawCount;
-         drawCount.numVertices = chunkSize;
-         if (incrementalDraw)
-         {
-            drawCount.numVertices = (this->nextBeginIndex >= this->endIndex) ? 0 :
-               std::min(chunkSize, this->endIndex - this->nextBeginIndex);
-         }
-         drawCount.moreToDraw = this->nextBeginIndex < this->endIndex;
-         return drawCount;
+                       double quality, bool incrementalDraw) const {
+      assert(isLeaf());
+      const double drawAllDist = 100;
+      double dist = (this->bbox.center() - relCamera).length();
+      double diagRadius = this->bbox.size().length()/2;
+      // Subtract bucket diagonal dist, since we really want an approx
+      // distance to closest point in the bucket, rather than dist to center.
+      dist = std::max(10.0, dist - diagRadius);
+      double desiredFraction = std::min(1.0, quality*pow(drawAllDist/dist, 2));
+      size_t chunkSize = (size_t)ceil(this->size()*desiredFraction);
+      DrawCount drawCount;
+      drawCount.numVertices = chunkSize;
+      if (incrementalDraw) {
+         drawCount.numVertices = (this->nextBeginIndex >= this->endIndex) ? 0 :
+            std::min(chunkSize, this->endIndex - this->nextBeginIndex);
       }
+      drawCount.moreToDraw = this->nextBeginIndex < this->endIndex;
+      return drawCount;
+   }
 };
 
 
@@ -162,7 +157,7 @@ static OctreeNode* makeTree(int depth, size_t* inds,
                             float halfWidth, ProgressFunc& progressFunc)
 {
     OctreeNode* node = new OctreeNode(center, halfWidth);
-    const size_t pointsPerNode = 1;//1; //100000;
+    const size_t pointsPerNode = 100000;//1; //100000;
     // Limit max depth of tree to prevent infinite recursion when
     // greater than pointsPerNode points lie at the same position in
     // space.  floats effectively have 24 bit of precision in the
@@ -170,8 +165,7 @@ static OctreeNode* makeTree(int depth, size_t* inds,
     const int maxDepth = 24;
     size_t* beginPtr = inds + beginIndex;
     size_t* endPtr = inds + endIndex;
-    if (endIndex - beginIndex <= pointsPerNode || depth >= maxDepth)
-    {
+    if (endIndex - beginIndex <= pointsPerNode || depth >= maxDepth) {
         static std::random_device rd;
         static std::mt19937 g(rd());
         std::shuffle(beginPtr, endPtr, g);
@@ -181,6 +175,7 @@ static OctreeNode* makeTree(int depth, size_t* inds,
             node->bbox.extendBy(P[inds[i]]);
         node->beginIndex = beginIndex;
         node->endIndex = endIndex;
+        node->representative = beginIndex;
         progressFunc(endIndex - beginIndex);
         return node;
     }
@@ -190,8 +185,8 @@ static OctreeNode* makeTree(int depth, size_t* inds,
     childRanges[0] = beginPtr;
     // Recursively generate child nodes
     float h = halfWidth/2;
-    for (int i = 0; i < 8; ++i)
-    {
+    const OctreeNode* repre = nullptr;
+    for (int i = 0; i < 8; ++i) {
         size_t childBeginIndex = childRanges[i]   - inds;
         size_t childEndIndex   = childRanges[i+1] - inds;
         if (childEndIndex == childBeginIndex)
@@ -199,8 +194,16 @@ static OctreeNode* makeTree(int depth, size_t* inds,
         V3f c = center + V3f((i     % 2 == 0) ? -h : h,
                              ((i/2) % 2 == 0) ? -h : h,
                              ((i/4) % 2 == 0) ? -h : h);
-        node->children[i] = makeTree(depth+1, inds, childBeginIndex,
-                                     childEndIndex, P, c, h, progressFunc);
+        OctreeNode* pON = makeTree(depth+1, inds, childBeginIndex,
+                                   childEndIndex, P, c, h, progressFunc);
+        if (repre) {
+           if (P[repre->beginIndex].z<P[pON->representative].z)
+              node->representative=pON->representative;
+        } else {
+           repre = pON;
+        }
+        node->representative=repre->representative;
+        node->children[i] = pON;
         node->bbox.extendBy(node->children[i]->bbox);
     }
     return node;
@@ -748,7 +751,7 @@ DrawCount PointArray::drawPoints (
 
    nowtm = time(NULL);
    renderAt=0;
-   if(nowtm-before>=2){
+   if (nowtm-before>=2) {
       before=nowtm;
       --currentInd;
       if(currentInd==0)currentInd=m_npoints;
@@ -811,69 +814,61 @@ DrawCount PointArray::drawPoints (
    // http://stackoverflow.com/questions/25111565/how-to-deallocate-glbufferdata-memory
    // http://hacksoflife.blogspot.com.au/2015/06/glmapbuffer-no-longer-cool.html )
    GLsizeiptr nodeBufferSize = perVertexBytes * m_npoints;
-   glBufferData(GL_ARRAY_BUFFER, nodeBufferSize, NULL, GL_STREAM_DRAW);
+   if (!m_Tris.size())
+      glBufferData(GL_ARRAY_BUFFER, nodeBufferSize, NULL, GL_STATIC_DRAW);
 
    // Draw points in each bucket, with total number drawn depending on how far
    // away the bucket is.  Since the points are shuffled, this corresponds to
    // a stochastic simplification of the full point cloud.
    V3f relCamera = relativeTrans.cameraPos();
    std::vector<const OctreeNode*> nodeStack;
-   std::vector<unsigned short> ndIndStack;
-   std::vector<const OctreeNode*> parntNdStack;
-   std::vector<unsigned short> parntNdIndStack;
    nodeStack.push_back(m_rootNode.get());
-   ndIndStack.push_back(0);
    GLintptr bufferOffset = 0;
-   unsigned int verticesToDraw = m_npoints;
+   unsigned int verticesToDraw;
    size_t ndStkInd = 0;
-   unsigned int avgNdDist = 10;
-   bool lastNodeIsLeaf = false;
-   std::vector<unsigned int> tris;
    std::map<Point3, unsigned>  cgalPts;
-   const OctreeNode* node = nodeStack.back();
-   short ndInd = ndIndStack.back();
+   const OctreeNode* node;
    if (m_Tris.size())
       goto draw;
+   verticesToDraw = m_npoints;
+   node = nodeStack.back();
    while (!nodeStack.empty()) {
       node = nodeStack.back();
-      ndInd = ndIndStack.back();
       nodeStack.pop_back();
-      ndIndStack.pop_back();
       if (clipBox.canCull(node->bbox))
          continue;
       if (node && !node->isLeaf()) {
-         if (lastNodeIsLeaf) {
-            parntNdStack.pop_back();
-            parntNdIndStack.pop_back();
-         }
-         parntNdStack.push_back(node);
-         parntNdIndStack.push_back(ndInd);
          for (int i = 7; i >=0; --i) {
             const OctreeNode* n = node->children[i];
             if (n) {
                nodeStack.push_back(n);
-               ndIndStack.push_back(i);
             }
          }
-         lastNodeIsLeaf=false;
          continue;
       }
-      lastNodeIsLeaf=true;
       if (!incrementalDraw)
          node->nextBeginIndex = node->beginIndex;
 
 //        if(node->endIndex<currentInd)
 //           break;
         
-      DrawCount nodeDrawCount
-         = node->drawCount(relCamera, quality, incrementalDraw);
+      if (m_fields.size() < 1)
+         continue;
+      if ((uint8_t)(m_fields[5].data.get()+node->nextBeginIndex)[0]!=2)
+         continue;
+
+      DrawCount nodeDrawCount;
+      nodeDrawCount.numVertices=1;
+//         = node->drawCount(relCamera, quality, incrementalDraw);
       mDrawCount += nodeDrawCount;
 
       if (nodeDrawCount.numVertices == 0)
          continue;
 
-      if (m_fields.size() < 1)
-         continue;
+      if (!(ndStkInd%100000)) {
+         node=node;
+      }
+
       /*
         g_logger.info("beginIndex: %d",node->beginIndex);
         g_logger.info("endIndex: %d",node->endIndex);
@@ -908,14 +903,13 @@ DrawCount PointArray::drawPoints (
                          bufferData);
          ///*
          if (i==0) {
-            g_logger.info("%d: %f,%f,%f",
-                          node->beginIndex, ((V3f*)bufferData)->x,
-                          ((V3f*)bufferData)->y, ((V3f*)bufferData)->z);
+            printf("%d: %f,%f,%f\n",
+                   node->beginIndex, ((V3f*)bufferData)->x,
+                   ((V3f*)bufferData)->y, ((V3f*)bufferData)->z);
             Point3 p3(((V3f*)bufferData)->x,
                       ((V3f*)bufferData)->y,
                       ((V3f*)bufferData)->z);
             cgalPts[p3]=ndStkInd;
-            //cgalPts.push_back(p3);
          }
          //*/
 
@@ -954,12 +948,14 @@ DrawCount PointArray::drawPoints (
       
       node->nextBeginIndex += nodeDrawCount.numVertices;
       
-      glDrawArrays(GL_POINTS, 0, (GLsizei)mDrawCount.numVertices);
+      //glDrawArrays(GL_POINTS, 0, (GLsizei)mDrawCount.numVertices);
       
       ++ndStkInd;
       if(mDrawCount.numVertices>=verticesToDraw)
          break;
    }
+   printf("numVertices: %d\n"
+          "cgalPts: %d\n", (GLsizei)mDrawCount.numVertices, cgalPts.size());
    mDrawCount.moreToDraw=1;
   draw:
    if (mDrawCount.numVertices>=3) { //renderAt) {
@@ -994,12 +990,11 @@ DrawCount PointArray::drawPoints (
          GL_UNSIGNED_INT,   // type
          (void*)0           // element array buffer offset
       );
+      glFlush();
+      glFinish();
       mDrawCount.moreToDraw=0;
-      for (int i=0;i<tris.size();++i)
-         g_logger.info("%lu",
-                       m_Tris[i]);
       g_logger.info("%d tris drawn",
-                    m_Tris.size());
+                    m_Tris.size()/3);
       /*
         for(int i=0; i< m_Tris.size(); ++i) {
         ++m_Tris[i];
@@ -1007,6 +1002,7 @@ DrawCount PointArray::drawPoints (
         m_Tris[i]=0;
         }
       */
+     drawDone:
    }
    //tfm::printf("Drew %d of total points %d, quality %f\n", totDraw, m_npoints, quality);
 

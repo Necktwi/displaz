@@ -26,7 +26,7 @@ struct TransformState;
 /// `moreToDraw` indicates whether the geometry is completely drawn
 struct DrawCount
 {
-    double numVertices;
+    size_t numVertices;
     bool   moreToDraw;
 
     DrawCount() : numVertices(0), moreToDraw(false) { }
