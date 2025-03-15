@@ -400,8 +400,9 @@ void View3D::paintGL()
 
     // Aim for 40ms frame time - an ok tradeoff for desktop usage
     const double targetMillisecs = 40;
-    double quality = m_drawCostModel.quality(targetMillisecs, geoms, transState,
-                                             m_incrementalDraw);
+    double quality = 0;
+    //quality=m_drawCostModel.quality(targetMillisecs, geoms, transState,
+    //                                         m_incrementalDraw);
 
     // Render points
     DrawCount drawCount = drawPoints(transState, geoms, quality, m_incrementalDraw);

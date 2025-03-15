@@ -33,6 +33,7 @@
 #include <CGAL/Triangulation_vertex_base_with_info_2.h>
 #include <CGAL/Triangulation_face_base_with_info_2.h>
 #include <map>
+#include <queue>
 
 #include "ply_io.h"
 
@@ -157,7 +158,7 @@ static OctreeNode* makeTree(int depth, size_t* inds,
                             float halfWidth, ProgressFunc& progressFunc)
 {
     OctreeNode* node = new OctreeNode(center, halfWidth);
-    const size_t pointsPerNode = 100000;//1; //100000;
+    const size_t pointsPerNode = 1;//1; //100000;
     // Limit max depth of tree to prevent infinite recursion when
     // greater than pointsPerNode points lie at the same position in
     // space.  floats effectively have 24 bit of precision in the
@@ -821,26 +822,33 @@ DrawCount PointArray::drawPoints (
    // away the bucket is.  Since the points are shuffled, this corresponds to
    // a stochastic simplification of the full point cloud.
    V3f relCamera = relativeTrans.cameraPos();
+   //std::queue<const OctreeNode*> nodeStack;
    std::vector<const OctreeNode*> nodeStack;
+   //nodeStack.push(m_rootNode.get());
    nodeStack.push_back(m_rootNode.get());
    GLintptr bufferOffset = 0;
    unsigned int verticesToDraw;
    size_t ndStkInd = 0;
+   size_t maxRndrPts = 10000000;
    std::map<Point3, unsigned>  cgalPts;
    const OctreeNode* node;
    if (m_Tris.size())
       goto draw;
    verticesToDraw = m_npoints;
+//   node = nodeStack.front();
    node = nodeStack.back();
    while (!nodeStack.empty()) {
+//      node = nodeStack.front();
       node = nodeStack.back();
+      //nodeStack.pop();
       nodeStack.pop_back();
       if (clipBox.canCull(node->bbox))
          continue;
-      if (node && !node->isLeaf()) {
+      if (node && !node->isLeaf() && nodeStack.size()<maxRndrPts) {
          for (int i = 7; i >=0; --i) {
             const OctreeNode* n = node->children[i];
             if (n) {
+               //nodeStack.push(n);
                nodeStack.push_back(n);
             }
          }
@@ -865,9 +873,9 @@ DrawCount PointArray::drawPoints (
       if (nodeDrawCount.numVertices == 0)
          continue;
 
-      if (!(ndStkInd%100000)) {
-         node=node;
-      }
+      // if (!(ndStkInd%100000)) {
+      //    node=node;
+      // }
 
       /*
         g_logger.info("beginIndex: %d",node->beginIndex);
@@ -898,13 +906,13 @@ DrawCount PointArray::drawPoints (
 
          // Upload raw data for `field` to the appropriate part of the buffer.
          char* bufferData =
-            field.data.get() + node->nextBeginIndex*field.spec.size();
+            field.data.get() + node->representative*field.spec.size();
          glBufferSubData(GL_ARRAY_BUFFER, bufferOffset, fieldBufferSize,
                          bufferData);
          ///*
          if (i==0) {
             printf("%d: %f,%f,%f\n",
-                   node->beginIndex, ((V3f*)bufferData)->x,
+                   node->representative, ((V3f*)bufferData)->x,
                    ((V3f*)bufferData)->y, ((V3f*)bufferData)->z);
             Point3 p3(((V3f*)bufferData)->x,
                       ((V3f*)bufferData)->y,
@@ -920,7 +928,7 @@ DrawCount PointArray::drawPoints (
          for (int j = 0; j < arraySize; ++j) {
             if(j>1)
                g_logger.info("ind: %ld, array: %d!",
-                             node->beginIndex, j);
+                             node->representative, j);
             const ShaderAttribute* attr = attributes[k+j];
             if (!attr)
                continue;
